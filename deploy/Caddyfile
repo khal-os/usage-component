@@ -21,6 +21,17 @@
 # hotfix on the VM must be copied back here, or it dies with the VM.
 
 # Module API — the product surface (client integrations, docs at /api/v1/docs/)
+#
+# EDGE AUTH (interim, 2026-08-09): the khal Auth System is not deployed on
+# real infra yet, so the module-level introspection gate (KHAL_* quartet)
+# stays off and THIS basicauth is what closes the otherwise-public archive.
+# The plaintext credential lives ONLY in clients/namastex.env on the VM
+# (deploy state). Preflights stay open (browsers send no credentials on
+# OPTIONS); callers (Farol, scripts) send `Authorization: Basic …` — already
+# in the CORS allow-list. When the platform lands: set the KHAL_* quartet
+# in the client env, recreate api, and DELETE this block + the wildcard
+# CORS below (module CORS_ALLOWED_ORIGINS takes over, audit D-1).
+# (caddy 2.6 spells it `basicauth`; 2.8+ renamed it `basic_auth`.)
 api.87-99-156-174.sslip.io {
 	@preflight method OPTIONS
 	handle @preflight {
@@ -29,6 +40,13 @@ api.87-99-156-174.sslip.io {
 		header Access-Control-Allow-Headers "Authorization, Content-Type"
 		header Access-Control-Max-Age "86400"
 		respond "" 204
+	}
+	# Matcher required: caddy's directive order runs basicauth BEFORE
+	# handle, so without it the @preflight 204 above never fires (browsers
+	# send no credentials on OPTIONS and CORS would break).
+	@gated not method OPTIONS
+	basicauth @gated {
+		namastex $2a$14$pun30cOJOPP4Z19rPOtAau7j0yXRGcmyx2I7jPLGt..PckzNWVYye
 	}
 	header Access-Control-Allow-Origin "*"
 	reverse_proxy 127.0.0.1:3003
