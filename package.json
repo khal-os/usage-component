@@ -15,7 +15,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:unit:ci": "npm run test:unit:ci --workspaces --if-present",
-    "prepare": "node .husky/install.mjs"
+    "prepare": "node .husky/install.mjs || true"
   },
   "keywords": [],
   "author": "",
