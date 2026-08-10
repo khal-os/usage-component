@@ -15,7 +15,7 @@ describe('shared Mongo env parser (audit C-6)', () => {
     const parsed = schema.parse({
       MONGO_DB_ATLAS: 'true',
       MONGO_DB_HOST: 'cluster0.example.mongodb.net',
-      MONGO_DB_NAME: 'observability',
+      MONGO_USAGE_DB_NAME: 'observability',
       MONGO_DB_USER: 'platform',
       MONGO_DB_PASSWORD: 's3cret',
       MONGO_DB_PORT: '27017',
@@ -32,22 +32,37 @@ describe('shared Mongo env parser (audit C-6)', () => {
   });
 
   it('MUST leave optional fields undefined and map the boolean/int strings', () => {
-    expect(toMongoDbEnvironment(schema.parse({}))).toEqual({
+    const base = { MONGO_USAGE_DB_NAME: 'observability' };
+
+    expect(toMongoDbEnvironment(schema.parse(base))).toEqual({
       mongoDbAtlas: undefined,
       mongoDbHost: undefined,
-      mongoDbName: undefined,
+      mongoDbName: 'observability',
       mongoDbUser: undefined,
       mongoDbPassword: undefined,
       mongoDbPort: undefined,
     });
     expect(
-      toMongoDbEnvironment(schema.parse({ MONGO_DB_ATLAS: 'false' }))
+      toMongoDbEnvironment(schema.parse({ ...base, MONGO_DB_ATLAS: 'false' }))
         .mongoDbAtlas,
     ).toBe(false);
   });
 
+  it('MUST refuse a missing or empty MONGO_USAGE_DB_NAME (decision 139 — declared, never inferred)', () => {
+    // Absent — the old contract silently defaulted to CLIENT_NAME here.
+    expect(schema.safeParse({}).success).toBe(false);
+    // Compose forwards '' for unset vars — empty must fail exactly like absent.
+    expect(schema.safeParse({ MONGO_USAGE_DB_NAME: '' }).success).toBe(false);
+  });
+
   it('MUST refuse a non-integer port and an invalid atlas flag', () => {
-    expect(schema.safeParse({ MONGO_DB_PORT: 'abc' }).success).toBe(false);
-    expect(schema.safeParse({ MONGO_DB_ATLAS: 'yes' }).success).toBe(false);
+    const base = { MONGO_USAGE_DB_NAME: 'observability' };
+
+    expect(schema.safeParse({ ...base, MONGO_DB_PORT: 'abc' }).success).toBe(
+      false,
+    );
+    expect(schema.safeParse({ ...base, MONGO_DB_ATLAS: 'yes' }).success).toBe(
+      false,
+    );
   });
 });

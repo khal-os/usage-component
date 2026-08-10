@@ -52,7 +52,7 @@ services:
       # external database = drop that file and set these in the env file.
       MONGO_DB_HOST: ${MONGO_DB_HOST:-mongo}
       MONGO_DB_PORT: ${MONGO_DB_PORT:-27017}
-      MONGO_DB_NAME: ${MONGO_DB_NAME:-${CLIENT_NAME}}
+      MONGO_USAGE_DB_NAME: ${MONGO_USAGE_DB_NAME:?set MONGO_USAGE_DB_NAME in the client env (the usage store is declared, never inferred — decision 139)}
       MONGO_DB_USER: ${MONGO_DB_USER:-}
       MONGO_DB_PASSWORD: ${MONGO_DB_PASSWORD:-}
       # Atlas mode (decision 65): 'true' switches the connection to
@@ -153,7 +153,7 @@ services:
       CLIENT_TIMEZONE: ${CLIENT_TIMEZONE:?set CLIENT_TIMEZONE in the client env (IANA) — decision 130}
       MONGO_DB_HOST: ${MONGO_DB_HOST:-mongo}
       MONGO_DB_PORT: ${MONGO_DB_PORT:-27017}
-      MONGO_DB_NAME: ${MONGO_DB_NAME:-${CLIENT_NAME}}
+      MONGO_USAGE_DB_NAME: ${MONGO_USAGE_DB_NAME:?set MONGO_USAGE_DB_NAME in the client env (the usage store is declared, never inferred — decision 139)}
       MONGO_DB_USER: ${MONGO_DB_USER:-}
       MONGO_DB_PASSWORD: ${MONGO_DB_PASSWORD:-}
       # Atlas mode (decision 65): 'true' switches the connection to

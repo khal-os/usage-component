@@ -93,6 +93,19 @@ LANGWATCH_PUBLIC_URL=http://localhost:${LANGWATCH_PORT}
 MONGO_DB_USER=${MONGO_USER}
 MONGO_DB_PASSWORD=${MONGO_PASS}
 
+# Decisão 139 (OBRIGATÓRIO): nome do database do usage store — declarado,
+# nunca inferido (o fallback CLIENT_NAME foi removido).
+MONGO_USAGE_DB_NAME=${NAME}
+
+# Decisão 139 (OBRIGATÓRIO): capacidade do LangWatch é decisão explícita —
+# compose recusa subir sem os cinco. Valores DEV; produção dimensiona por
+# cliente (example.production.env §9).
+LANGWATCH_WORKERS_REPLICAS=1
+LANGWATCH_MEMORY_LIMIT=2g
+LW_REDIS_MEMORY_LIMIT=512m
+LW_CLICKHOUSE_MEMORY_LIMIT=2g
+LW_CLICKHOUSE_CPU_LIMIT=1.0
+
 
 LW_NEXTAUTH_SECRET=$(openssl rand -base64 32)
 LW_API_TOKEN_JWT_SECRET=$(openssl rand -base64 32)

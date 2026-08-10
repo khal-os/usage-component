@@ -152,10 +152,10 @@ describe('buildMongoDbUri()', () => {
 
     it('MUST refuse a local URI missing host or database — never mongodb://undefined/undefined', () => {
       expect(() => buildMongoDbUri({ mongoDbName: 'cleandb' })).toThrow(
-        /MONGO_DB_HOST and MONGO_DB_NAME/,
+        /MONGO_DB_HOST and MONGO_USAGE_DB_NAME/,
       );
       expect(() => buildMongoDbUri({ mongoDbHost: 'mongo' })).toThrow(
-        /MONGO_DB_HOST and MONGO_DB_NAME/,
+        /MONGO_DB_HOST and MONGO_USAGE_DB_NAME/,
       );
     });
   });
