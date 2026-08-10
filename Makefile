@@ -45,6 +45,7 @@ SCRUB = env -u COMPOSE_PROJECT_NAME -u CLIENT_NAME -u CLIENT_TIMEZONE -u API_POR
           -u LANGWATCH_PORT -u LANGWATCH_PUBLIC_URL -u LANGWATCH_PROJECT_ID -u TRACE_SOURCE \
           -u API_BIND -u LANGWATCH_BIND -u UI_BIND \
           -u KHAL_DISCOVERY_URL -u KHAL_TENANT -u KHAL_CLIENT_ID -u KHAL_CLIENT_SECRET \
+          -u BASIC_AUTH_USER -u BASIC_AUTH_PASSWORD \
           -u CORS_ALLOWED_ORIGINS \
           -u MONGO_DB_HOST -u MONGO_DB_PORT -u MONGO_MEMORY_LIMIT \
           -u MONGO_DB_USER -u MONGO_DB_PASSWORD -u MONGO_HOST_PORT -u MONGO_DB_ATLAS \
@@ -160,6 +161,14 @@ backup: require-client
 	else \
 	  rm -f "$$out"; echo "backup falhou — a stack do cliente está no ar? (make up CLIENT=$(CLIENT))"; exit 1; \
 	fi
+
+# ---- AWS factory (decision 140 — deploy/RUNBOOK-AWS.md) ----
+
+# Roll one tenant to an image SHA: registers new task-def revisions, runs
+# the migrations gate, then rolls the services. Rollback = older SHA.
+aws-deploy: require-client
+	@test -n "$(SHA)" || { echo "uso: make aws-deploy CLIENT=<cliente> SHA=<git-sha>"; exit 1; }
+	bash deploy/scripts/deploy-tenant.sh $(CLIENT) $(SHA)
 
 # ---- one-off jobs ----
 

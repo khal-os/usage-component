@@ -1,0 +1,140 @@
+# LangWatch-ONLY stack for the tenant EC2 (decision 140) — the services
+# mirrored from the repo's compose.connector.yml MINUS the trace-ingestion
+# worker (it runs in Fargate and reads ClickHouse over the VPC).
+# Interpolation comes from /opt/langwatch/.env, written at boot by
+# user-data from the tenant's Secrets Manager JSON + declared capacity
+# knobs — the `:?` guards keep the fail-fast contract (decision 139) even
+# here: a bad boot refuses to start rather than running dev-shaped.
+
+x-langwatch-env: &langwatch-env
+  SKIP_ENV_VALIDATION: "true"
+  NODE_ENV: production
+  INSTALL_METHOD: docker
+  DATABASE_URL: postgresql://prisma:prisma@postgres:5432/mydb?schema=mydb
+  CLICKHOUSE_URL: http://default:langwatch@clickhouse:8123/langwatch
+  REDIS_URL: redis://redis:6379
+  LANGWATCH_ENDPOINT: http://langwatch:5560
+  BASE_HOST: ${LANGWATCH_PUBLIC_URL:?written by user-data}
+  NEXTAUTH_URL: ${LANGWATCH_PUBLIC_URL}
+  LANGWATCH_API_URL: ${LANGWATCH_PUBLIC_URL}
+  NEXTAUTH_PROVIDER: email
+  NEXTAUTH_SECRET: ${LW_NEXTAUTH_SECRET:?from the tenant secret}
+  API_TOKEN_JWT_SECRET: ${LW_API_TOKEN_JWT_SECRET:?from the tenant secret}
+  CREDENTIALS_SECRET: ${LW_CREDENTIALS_SECRET:?from the tenant secret — must never change after first boot}
+
+x-langwatch-deps: &langwatch-deps
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  clickhouse:
+    condition: service_healthy
+
+services:
+  langwatch:
+    image: langwatch/langwatch:3.5.0
+    container_name: ${CLIENT_NAME}-langwatch
+    environment:
+      <<: *langwatch-env
+    ports:
+      # 0.0.0.0 is safe HERE only because the instance is in a private
+      # subnet and the SG admits just the ALB (5560) and connector (8123).
+      - "5560:5560"
+    depends_on:
+      <<: *langwatch-deps
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5560/ > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${LANGWATCH_MEMORY_LIMIT:?capacity is declared — decision 139}
+
+  langwatch-workers:
+    image: langwatch/langwatch:3.5.0
+    command: ["pnpm", "run", "start:workers"]
+    working_dir: /app/langwatch
+    environment:
+      <<: *langwatch-env
+    depends_on:
+      <<: *langwatch-deps
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep node > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    deploy:
+      replicas: ${LANGWATCH_WORKERS_REPLICAS:?capacity is declared — decision 139}
+      resources:
+        limits:
+          memory: ${LANGWATCH_WORKERS_MEMORY_LIMIT:-1536m}
+
+  postgres:
+    image: postgres:16
+    container_name: ${CLIENT_NAME}-langwatch-postgres
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: prisma
+      POSTGRES_PASSWORD: prisma
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prisma -d mydb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${LW_POSTGRES_MEMORY_LIMIT:-256m}
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${CLIENT_NAME}-langwatch-redis
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${LW_REDIS_MEMORY_LIMIT:?the ingest queue's burst headroom — decision 139}
+
+  clickhouse:
+    image: langwatch/clickhouse-serverless:0.2.0
+    container_name: ${CLIENT_NAME}-langwatch-clickhouse
+    environment:
+      CLICKHOUSE_PASSWORD: langwatch
+    ports:
+      # ClickHouse reachable by the Fargate connector (SG-restricted).
+      - "8123:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${LW_CLICKHOUSE_MEMORY_LIMIT:?capacity is declared — decision 139}
+          cpus: ${LW_CLICKHOUSE_CPU_LIMIT:?capacity is declared — decision 139}
+
+volumes:
+  db-data:
+  redis-data:
+  clickhouse-data:

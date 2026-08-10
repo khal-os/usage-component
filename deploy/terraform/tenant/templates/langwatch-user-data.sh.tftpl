@@ -1,0 +1,58 @@
+#!/bin/bash
+# Boot the tenant's LangWatch stack (decision 140). The env file is
+# DISPOSABLE OUTPUT — regenerated from Secrets Manager + declared knobs on
+# every boot; the source of truth is never a file on this box (the lesson
+# of the 2026-08-05 clobber incident).
+set -euo pipefail
+
+dnf install -y docker jq
+systemctl enable --now docker
+
+# docker compose plugin (AL2023 has no package for it)
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -fsSL "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+mkdir -p /opt/langwatch
+cd /opt/langwatch
+
+cat > compose.yml <<'COMPOSE_EOF'
+${compose_file}
+COMPOSE_EOF
+
+SECRET_JSON=$(aws secretsmanager get-secret-value \
+  --secret-id "${secret_arn}" --region "${region}" \
+  --query SecretString --output text)
+
+cat > .env <<ENV_EOF
+CLIENT_NAME=${client_name}
+LANGWATCH_PUBLIC_URL=${langwatch_public_url}
+LW_NEXTAUTH_SECRET=$(echo "$SECRET_JSON" | jq -r .LW_NEXTAUTH_SECRET)
+LW_API_TOKEN_JWT_SECRET=$(echo "$SECRET_JSON" | jq -r .LW_API_TOKEN_JWT_SECRET)
+LW_CREDENTIALS_SECRET=$(echo "$SECRET_JSON" | jq -r .LW_CREDENTIALS_SECRET)
+LANGWATCH_WORKERS_REPLICAS=${langwatch_workers_replicas}
+LANGWATCH_MEMORY_LIMIT=${langwatch_memory_limit}
+LW_REDIS_MEMORY_LIMIT=${lw_redis_memory_limit}
+LW_CLICKHOUSE_MEMORY_LIMIT=${lw_clickhouse_memory_limit}
+LW_CLICKHOUSE_CPU_LIMIT=${lw_clickhouse_cpu_limit}
+ENV_EOF
+chmod 600 .env
+
+docker compose --env-file .env up -d
+
+# Queue-backlog metric (decision 139): redis container memory percent,
+# published every minute — the alarm watches this. treat_missing_data =
+# breaching, so if this cron dies the alarm fires too.
+cat > queue-metric.sh <<'METRIC_EOF'
+#!/bin/bash
+PCT=$(docker stats --no-stream --format '{{.MemPerc}}' ${client_name}-langwatch-redis | tr -d '%')
+[ -n "$PCT" ] && aws cloudwatch put-metric-data \
+  --region ${region} \
+  --namespace Usage/LangWatch \
+  --metric-name RedisUsedMemoryPercent \
+  --dimensions Tenant=${client_name} \
+  --value "$PCT"
+METRIC_EOF
+chmod +x queue-metric.sh
+echo "* * * * * root /opt/langwatch/queue-metric.sh >/dev/null 2>&1" > /etc/cron.d/langwatch-queue-metric

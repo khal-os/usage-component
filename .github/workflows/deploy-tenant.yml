@@ -1,0 +1,39 @@
+# Manual, per-tenant deploy (decision 140): production changes when the
+# operator says so — the button IS the checkpoint. Same mechanism as
+# `make aws-deploy` (deploy/scripts/deploy-tenant.sh).
+name: deploy-tenant
+
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: "Tenant slug (e.g. namastex)"
+        required: true
+      sha:
+        description: "Image SHA to deploy (a build-images tag; default: this commit)"
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.client }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy
+        run: |
+          bash deploy/scripts/deploy-tenant.sh \
+            "${{ inputs.client }}" "${{ inputs.sha || github.sha }}"

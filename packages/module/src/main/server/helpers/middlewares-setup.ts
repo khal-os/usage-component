@@ -8,7 +8,10 @@ import {
   defaultContentTypeMiddleware,
   makeRequestLoggerMiddleware,
 } from '../middlewares/index.js';
-import { makeAuthMiddleware } from '../../factories/auth-factory.js';
+import {
+  makeAuthMiddleware,
+  makeBasicAuthMiddleware,
+} from '../../factories/auth-factory.js';
 
 export const setupMiddlewares = (app: Application, logger: Logger): void => {
   // Fingerprinting header — no reason to advertise the framework.
@@ -23,6 +26,9 @@ export const setupMiddlewares = (app: Application, logger: Logger): void => {
   app.use(corsMiddleware);
   // After CORS (preflights must answer), before routes. Docs are mounted
   // BEFORE middlewares in app.ts and stay open — they are the healthcheck.
+  // Interim edge gate first (decision 141) — mutually exclusive with the
+  // khal gate by env-schema construction, so at most one is ever active.
+  app.use(makeBasicAuthMiddleware());
   app.use(makeAuthMiddleware());
   app.use(defaultContentTypeMiddleware);
   // audit D-7: no-store + nosniff defaults; controllers override for the

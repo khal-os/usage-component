@@ -97,6 +97,11 @@ const envSchema = z
     KHAL_TENANT: optionalNonEmptyString,
     KHAL_CLIENT_ID: optionalNonEmptyString,
     KHAL_CLIENT_SECRET: optionalNonEmptyString,
+    // Decision 141: INTERIM edge gate until the KHAL quartet has real
+    // infra. Constraints enforced in the superRefine below the object:
+    // both-or-neither, and never alongside the quartet.
+    BASIC_AUTH_USER: optionalNonEmptyString,
+    BASIC_AUTH_PASSWORD: optionalNonEmptyString,
     // audit D-1: cross-origin is an explicit operator act — exact origins,
     // comma-separated; unset/empty = same-origin only (no CORS headers).
     CORS_ALLOWED_ORIGINS: optionalNonEmptyString,
@@ -115,6 +120,34 @@ const envSchema = z
     ...mongoEnvSchemaShape,
     // Same rule for the logging knobs: one reader, both images.
     ...logEnvSchemaShape,
+  })
+  .superRefine((env, ctx) => {
+    // Decision 141, fail-fast (decision 139's convention): half a
+    // credential pair must never half-enable auth, and running BOTH gates
+    // hides "which one 401'd me" — switching to platform auth means
+    // DELETING the BASIC_AUTH_* knobs, said out loud at boot.
+    const basicCount = [env.BASIC_AUTH_USER, env.BASIC_AUTH_PASSWORD].filter(
+      Boolean,
+    ).length;
+
+    if (basicCount === 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'BASIC_AUTH_USER and BASIC_AUTH_PASSWORD must be set TOGETHER ' +
+          '(decision 141) — half a pair would half-enable auth',
+      });
+    }
+
+    if (basicCount > 0 && env.KHAL_DISCOVERY_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'BASIC_AUTH_* and KHAL_DISCOVERY_URL are mutually exclusive ' +
+          '(decision 141) — the quartet replaces the interim gate: delete ' +
+          'the BASIC_AUTH_* knobs when switching',
+      });
+    }
   })
   .transform((env) => ({
     ...env,
@@ -184,6 +217,8 @@ export const environment: EnvironmentVariables = {
   corsAllowedOrigins: safeEnvironment.CORS_ALLOWED_ORIGINS,
   khalClientId: safeEnvironment.KHAL_CLIENT_ID,
   khalClientSecret: safeEnvironment.KHAL_CLIENT_SECRET,
+  basicAuthUser: safeEnvironment.BASIC_AUTH_USER,
+  basicAuthPassword: safeEnvironment.BASIC_AUTH_PASSWORD,
   billingAutoCloseDelayMinutes:
     safeEnvironment.BILLING_AUTO_CLOSE_DELAY_MINUTES,
   billingAutoCloseCheckIntervalSeconds:

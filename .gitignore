@@ -14,3 +14,11 @@ loadtest/*.archive.gz
 
 # Mongo backups (make backup) — client data, never committed
 backups/
+
+# Terraform: state is remote (S3), local artifacts and real backend/tfvars
+# configs name live infrastructure — never committed
+**/.terraform/
+*.tfstate
+*.tfstate.*
+deploy/terraform/**/backend.hcl
+deploy/terraform/**/*.auto.tfvars
