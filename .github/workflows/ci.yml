@@ -29,6 +29,9 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      # Spec integrity (decision 137): decision-log numbering, RESOLVIDA
+      # references, code decision/QA markers, Makefile SCRUB completeness.
+      - run: node scripts/spec-check.mjs
 
   typecheck:
     name: Typecheck

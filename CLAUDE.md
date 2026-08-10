@@ -173,6 +173,13 @@ an omission. Nothing configured → API open (PoC behavior).
   misnamed file silently runs in the wrong suite.
 - When a decision is made during implementation, append it to the decision
   log in `docs/produto/backlog-v2.3.md` instead of leaving it implicit.
+- Spec workflows are SKILLS, not memory (decision 137): recording decisions
+  (`append-decision`), resolving QAs (`resolve-qa`), new endpoints
+  (`feature-slice`), env vars (`env-knob`), operator jobs (`runbook-job`),
+  done-checks (`spec-review`), new stories (`author-story`), onboarding
+  (`spec-kickoff`) — all under `.claude/skills/`. `scripts/spec-check.mjs`
+  (CI + pre-push) mechanically enforces decision-log numbering, RESOLVIDA
+  references, code decision/QA markers, and Makefile SCRUB completeness.
 - Open questions (QA1–QA19) are listed at the end of the backlog doc. QA14
   (LangWatch API fidelity) is RESOLVED (spike 2026-07-20, decision 40) —
   `// QA14:` comments now mark fidelity findings (e.g. the search-cap
