@@ -75,9 +75,10 @@ export const formatDateTimeDisplay = (date: Date): string => {
 
 /**
  * "01/07/2026" — calendar date in UTC. For PRICE effective dates only,
- * which remain UTC calendar dates (QA19 pending: price effectiveness is
- * an instant comparison, deliberately untouched by decision 130). Day
- * bucketing of traces uses formatClientDateDisplay below.
+ * which remain UTC calendar dates (QA19 resolved, decision 138: price
+ * effectiveness is an instant comparison, deliberately untouched by
+ * decision 130). Day bucketing of traces uses formatClientDateDisplay
+ * below.
  */
 export const formatUtcDateDisplay = (date: Date): string =>
   `${pad2(date.getUTCDate())}/${pad2(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}`;

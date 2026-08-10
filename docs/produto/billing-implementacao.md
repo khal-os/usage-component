@@ -246,8 +246,9 @@ comparação, donut de mix, card de cache, exports).
 - **Sua intuição da noite estava certa** e virou a decisão 88: mês corrente
   COMPUTADO ao vivo, mês fechado CARIMBADO (snapshot), mesma lógica dos
   tokens — e com UM motor só, a igualdade é por construção.
-- **QA19 segue aberta** (regra as-of do carimbo) — o fechamento COPIA os
-  carimbos, não re-precifica; nada aqui depende da resposta.
+- ~~QA19 segue aberta~~ **RESOLVIDA (decisão 138, 09/08/2026)**: preço
+  vigente na data do trace — o fechamento COPIA os carimbos, não
+  re-precifica; nada aqui mudou com a resposta.
 - ~~Fronteira de mês em UTC~~ **RESOLVIDO (decisão 130, 04/08/2026)**: a
   fronteira é a meia-noite do CLIENTE, do knob obrigatório
   `CLIENT_TIMEZONE` (IANA) — fronteira de faturamento ≡ fuso de exibição,

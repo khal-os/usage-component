@@ -50,7 +50,7 @@ imports count as the layer they name (`@observability/core/<layer>/…`).
 
 1. **Price is stamped at ingestion and is immutable.** The stamp uses the
    price version **effective on the trace's date** (as-of at write time —
-   pending confirmation, QA19). A later price change NEVER re-prices a stored
+   confirmed, decision 138). A later price change NEVER re-prices a stored
    trace; it only affects traces ingested afterward.
 2. **A trace with no applicable price is stored as `pending_price`** — tokens
    kept, cost open, excluded from R$ totals. It is NEVER valued at R$ 0.00.
@@ -183,6 +183,7 @@ an omission. Nothing configured → API open (PoC behavior).
 - Open questions (QA1–QA19) are listed at the end of the backlog doc. QA14
   (LangWatch API fidelity) is RESOLVED (spike 2026-07-20, decision 40) —
   `// QA14:` comments now mark fidelity findings (e.g. the search-cap
-  guard), not pending work. QA19 (stamp rule) remains OPEN and most affects
-  this code — flag any code path that depends on its answer with a
-  `// QA19:` comment.
+  guard), not pending work. QA19 (stamp rule) is RESOLVED too (decision
+  138: price effective on the TRACE's date, as-of at write time; price
+  `effective_from` stays a UTC-instant comparison) — `// QA19:` comments
+  mark where that rule lives, not pending work.
