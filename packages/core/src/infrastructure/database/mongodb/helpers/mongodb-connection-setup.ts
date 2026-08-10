@@ -37,8 +37,9 @@ export const buildMongoDbUri = ({
     // empty host/user/pass) produced outside Docker.
     if (!mongoDbUser || !mongoDbPassword || !mongoDbHost || !mongoDbName) {
       throw new Error(
-        'MONGO_DB_ATLAS requires MONGO_DB_HOST, MONGO_DB_NAME, MONGO_DB_USER ' +
-          'and MONGO_DB_PASSWORD (Atlas always authenticates) — audit F-5.',
+        'MONGO_DB_ATLAS requires MONGO_DB_HOST, MONGO_USAGE_DB_NAME, ' +
+          'MONGO_DB_USER and MONGO_DB_PASSWORD (Atlas always authenticates) ' +
+          '— audit F-5.',
       );
     }
 
@@ -51,7 +52,7 @@ export const buildMongoDbUri = ({
   // Local/non-Atlas mode still needs a host and a database name to point at.
   if (!mongoDbHost || !mongoDbName) {
     throw new Error(
-      'MongoDB requires MONGO_DB_HOST and MONGO_DB_NAME — audit F-5: a ' +
+      'MongoDB requires MONGO_DB_HOST and MONGO_USAGE_DB_NAME — audit F-5: a ' +
         'missing one composed `mongodb://undefined:.../undefined` and died ' +
         'at connect with a DNS error instead of naming the variable.',
     );

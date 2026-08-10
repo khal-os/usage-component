@@ -113,7 +113,7 @@ services:
       CLIENT_TIMEZONE: ${CLIENT_TIMEZONE:?set CLIENT_TIMEZONE in the client env (IANA) — decision 130}
       MONGO_DB_HOST: ${MONGO_DB_HOST:-mongo}
       MONGO_DB_PORT: ${MONGO_DB_PORT:-27017}
-      MONGO_DB_NAME: ${MONGO_DB_NAME:-${CLIENT_NAME}}
+      MONGO_USAGE_DB_NAME: ${MONGO_USAGE_DB_NAME:?set MONGO_USAGE_DB_NAME in the client env (the usage store is declared, never inferred — decision 139)}
       MONGO_DB_USER: ${MONGO_DB_USER:-}
       MONGO_DB_PASSWORD: ${MONGO_DB_PASSWORD:-}
       # Atlas mode (decision 65) — same switch as the module's api.
@@ -195,7 +195,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${LANGWATCH_MEMORY_LIMIT:-2g}
+          # Decision 139: capacity is a decision, not a default — the 1000
+          # traces/s incident ran dev-shaped limits nobody chose.
+          memory: ${LANGWATCH_MEMORY_LIMIT:?set LANGWATCH_MEMORY_LIMIT in the client env (capacity is declared — decision 139)}
 
   # The horizontal-scaling unit: stateless queue consumers coordinated by
   # redis. No container_name — a fixed name caps replicas at 1 (two
@@ -219,7 +221,9 @@ services:
       start_period: 60s
     restart: unless-stopped
     deploy:
-      replicas: ${LANGWATCH_WORKERS_REPLICAS:-1}
+      # Decision 139: the drain rate of the ingest queue — 1 replica was
+      # the dev-shaped value the 1000 traces/s incident ran on.
+      replicas: ${LANGWATCH_WORKERS_REPLICAS:?set LANGWATCH_WORKERS_REPLICAS in the client env (capacity is declared — decision 139)}
       resources:
         limits:
           memory: ${LANGWATCH_WORKERS_MEMORY_LIMIT:-1536m} # upstream dev compose cap, per replica
@@ -261,7 +265,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${LW_REDIS_MEMORY_LIMIT:-512m} # upstream raised this from 64m after BGSAVE OOM kills
+          # Decision 139: THE queue that chokes under burst — at 512m the
+          # 1000 traces/s test grew the backlog into an OOM. Size it for
+          # burst absorption (backlog, not OOM); upstream had raised it
+          # from 64m after BGSAVE OOM kills already.
+          memory: ${LW_REDIS_MEMORY_LIMIT:?set LW_REDIS_MEMORY_LIMIT in the client env (the ingest queue's burst headroom — decision 139)}
 
   clickhouse:
     image: langwatch/clickhouse-serverless:0.2.0
@@ -280,8 +288,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${LW_CLICKHOUSE_MEMORY_LIMIT:-2g}
-          cpus: ${LW_CLICKHOUSE_CPU_LIMIT:-1.0}
+          # Decision 139: writes under burst starve reads on a shared box
+          # (the incident's "trace list loads forever") — declared, sized
+          # with read-path headroom.
+          memory: ${LW_CLICKHOUSE_MEMORY_LIMIT:?set LW_CLICKHOUSE_MEMORY_LIMIT in the client env (capacity is declared — decision 139)}
+          cpus: ${LW_CLICKHOUSE_CPU_LIMIT:?set LW_CLICKHOUSE_CPU_LIMIT in the client env (capacity is declared — decision 139)}
 
 volumes:
   db-data:
