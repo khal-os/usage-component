@@ -1,0 +1,7 @@
+# cp backend.hcl.example backend.hcl  (backend.hcl is gitignored — it names
+# real infrastructure), then: terraform init -backend-config=backend.hcl
+bucket       = "<state-bucket-name>"
+key          = "usage-component/foundation.tfstate"
+region       = "<region>"
+encrypt      = true
+use_lockfile = true

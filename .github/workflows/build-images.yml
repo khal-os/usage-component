@@ -1,0 +1,50 @@
+# Decision 140: images are built ONCE per git SHA, pushed to ECR, and every
+# tenant runs the same tag. IMMUTABLE tags — rollback is redeploying an
+# older SHA, never rebuilding. Auth is OIDC (no stored AWS keys): the role
+# is the foundation's `github_ci_role_arn` output, wired as the
+# AWS_DEPLOY_ROLE_ARN repository variable (AWS_REGION likewise).
+name: build-images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [module, connector]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push platform-${{ matrix.image }}:${{ github.sha }}
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/platform-${{ matrix.image }}:${{ github.sha }}"
+          # Immutable tags: if this SHA is already pushed (workflow rerun),
+          # rebuilding it would be refused — skip instead.
+          if aws ecr describe-images \
+              --repository-name "platform-${{ matrix.image }}" \
+              --image-ids imageTag="${{ github.sha }}" >/dev/null 2>&1; then
+            echo "SHA already in ECR — nothing to do (immutable tags)"
+            exit 0
+          fi
+          docker build -f docker/${{ matrix.image }}.Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
