@@ -2,6 +2,7 @@ node_modules
 dist
 .env*
 !.env.example
+!.env.test
 coverage
 globalConfig.json
 *.tsbuildinfo
