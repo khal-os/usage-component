@@ -75,6 +75,16 @@ variable "api_autoscale_max" {
   default     = 4
 }
 
+variable "enable_basic_auth" {
+  description = <<-EOT
+    Decision 141: interim HTTP Basic gate on /api/v1 (BASIC_AUTH_USER /
+    BASIC_AUTH_PASSWORD keys must then exist in the tenant secret). Turn
+    OFF only when the KHAL quartet is configured — a public open API is a
+    declared decision, never an omission. No default (decision 139).
+  EOT
+  type        = bool
+}
+
 variable "cors_allowed_origins" {
   description = "Exact origins, comma-separated; empty = same-origin only (audit D-1)."
   type        = string

@@ -33,4 +33,11 @@ export interface ServerEnvironmentVariables {
    */
   khalClientId?: string;
   khalClientSecret?: string;
+  /**
+   * Decision 141: INTERIM HTTP Basic gate for /api/v1 until the KHAL
+   * quartet points at real infra — then these are DELETED (the env schema
+   * refuses both at once). Set together or not at all.
+   */
+  basicAuthUser?: string;
+  basicAuthPassword?: string;
 }

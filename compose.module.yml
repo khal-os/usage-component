@@ -72,6 +72,10 @@ services:
       # audit D-1: cross-origin is opt-in — exact origins, comma-separated;
       # empty = same-origin only (no CORS headers at all).
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      # Decision 141: interim edge gate — both or neither (the env schema
+      # refuses half a pair, and refuses coexistence with KHAL_*).
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-}
+      BASIC_AUTH_PASSWORD: ${BASIC_AUTH_PASSWORD:-}
       # Logging knobs (one shared reader in core, both images): empty means
       # the defaults — level info, json lines on stdout.
       LOG_LEVEL: ${LOG_LEVEL:-}

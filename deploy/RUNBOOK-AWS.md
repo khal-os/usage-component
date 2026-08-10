@@ -35,7 +35,9 @@ tenant, nothing defaults).
      "MONGO_DB_USER": "...", "MONGO_DB_PASSWORD": "...",
      "LW_NEXTAUTH_SECRET": "<openssl rand -base64 32>",
      "LW_API_TOKEN_JWT_SECRET": "<openssl rand -base64 32>",
-     "LW_CREDENTIALS_SECRET": "<openssl rand -base64 32 — NEVER change after first boot>"
+     "LW_CREDENTIALS_SECRET": "<openssl rand -base64 32 — NEVER change after first boot>",
+     "BASIC_AUTH_USER": "<client slug is fine>",
+     "BASIC_AUTH_PASSWORD": "<openssl rand -base64 24 — decision 141; drop the pair (and set enable_basic_auth=false) only when the KHAL quartet takes over>"
    }'
    ```
    Then reboot the LangWatch EC2 once (user-data re-reads the secret) and

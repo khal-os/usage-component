@@ -9,6 +9,9 @@ client_name         = "example"
 client_timezone     = "America/Sao_Paulo"
 mongo_usage_db_name = "example_usage"
 
+# Decision 141: interim Basic gate until this tenant's KHAL quartet lands.
+enable_basic_auth = true
+
 # The SHA of the images this tenant runs (build-images tags; later deploys
 # move it via `make aws-deploy`, terraform ignores the drift).
 image_sha = "<git sha>"

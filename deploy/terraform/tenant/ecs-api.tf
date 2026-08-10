@@ -98,7 +98,12 @@ resource "aws_ecs_task_definition" "api" {
       { name = "SERVER_PORT", value = "3000" },
       { name = "CORS_ALLOWED_ORIGINS", value = var.cors_allowed_origins },
     ])
-    secrets          = local.mongo_secrets
+    # Decision 141: the interim gate's pair rides the tenant secret; off
+    # only when the KHAL quartet takes over.
+    secrets = concat(local.mongo_secrets, var.enable_basic_auth ? [
+      for k in ["BASIC_AUTH_USER", "BASIC_AUTH_PASSWORD"] :
+      { name = k, valueFrom = "${aws_secretsmanager_secret.tenant.arn}:${k}::" }
+    ] : [])
     logConfiguration = local.log_conf["api"]
   }])
 }
