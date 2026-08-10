@@ -67,6 +67,18 @@ output "base_domain" {
   value = var.base_domain
 }
 
+output "backups_bucket_name" {
+  value = aws_s3_bucket.backups.bucket
+}
+
+output "backups_bucket_arn" {
+  value = aws_s3_bucket.backups.arn
+}
+
+output "alerts_topic_arn" {
+  value = aws_sns_topic.alerts.arn
+}
+
 output "github_ci_role_arn" {
   description = "Set as the AWS_DEPLOY_ROLE_ARN repository variable in GitHub."
   value       = aws_iam_role.github_ci.arn

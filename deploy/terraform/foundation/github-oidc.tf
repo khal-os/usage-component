@@ -67,3 +67,53 @@ resource "aws_iam_role_policy" "github_ci_ecr" {
   role   = aws_iam_role.github_ci.id
   policy = data.aws_iam_policy_document.ecr_push.json
 }
+
+# Deploy permissions (Phase 2): register a new task-def revision, roll the
+# tenant services, run the one-off migrations task, and wait on it. Scoped
+# by the usage-* naming convention every tenant resource follows.
+data "aws_iam_policy_document" "ecs_deploy" {
+  statement {
+    sid = "DescribeAndRegister"
+    actions = [
+      "ecs:DescribeTaskDefinition",
+      "ecs:RegisterTaskDefinition",
+      "ecs:DescribeServices",
+      "ecs:DescribeTasks",
+      "ecs:ListTasks",
+    ]
+    resources = ["*"] # these ECS read/register actions don't support resource scoping
+  }
+
+  statement {
+    sid = "RollServicesAndRunJobs"
+    actions = [
+      "ecs:UpdateService",
+      "ecs:RunTask",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.main.arn]
+    }
+  }
+
+  statement {
+    sid       = "PassTenantRoles"
+    actions   = ["iam:PassRole"]
+    resources = ["arn:${data.aws_partition.current.partition}:iam::*:role/usage-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "github_ci_deploy" {
+  name   = "ecs-deploy"
+  role   = aws_iam_role.github_ci.id
+  policy = data.aws_iam_policy_document.ecs_deploy.json
+}

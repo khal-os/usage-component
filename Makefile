@@ -161,6 +161,14 @@ backup: require-client
 	  rm -f "$$out"; echo "backup falhou — a stack do cliente está no ar? (make up CLIENT=$(CLIENT))"; exit 1; \
 	fi
 
+# ---- AWS factory (decision 140 — deploy/RUNBOOK-AWS.md) ----
+
+# Roll one tenant to an image SHA: registers new task-def revisions, runs
+# the migrations gate, then rolls the services. Rollback = older SHA.
+aws-deploy: require-client
+	@test -n "$(SHA)" || { echo "uso: make aws-deploy CLIENT=<cliente> SHA=<git-sha>"; exit 1; }
+	bash deploy/scripts/deploy-tenant.sh $(CLIENT) $(SHA)
+
 # ---- one-off jobs ----
 
 migrate: require-client
