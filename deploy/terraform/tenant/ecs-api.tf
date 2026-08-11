@@ -187,9 +187,11 @@ resource "aws_ecs_service" "api" {
   }
 
   lifecycle {
-    # The deploy script rolls task-definition revisions; terraform must not
-    # fight it back to an older SHA on the next apply.
-    ignore_changes = [task_definition]
+    # task_definition: the deploy script rolls revisions; terraform must
+    # not fight it back to an older SHA. desired_count (audit round 2):
+    # autoscaling owns it — a day-2 apply mid-scale-out must not snap the
+    # api back to 1 task under load.
+    ignore_changes = [task_definition, desired_count]
   }
 }
 

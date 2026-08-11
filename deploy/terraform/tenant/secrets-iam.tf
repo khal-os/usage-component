@@ -83,9 +83,16 @@ resource "aws_iam_role" "backup_task" {
 data "aws_iam_policy_document" "backup_s3" {
   statement {
     # tmp-key upload + rename-on-success (review fix: a truncated dump
-    # must never sit at a normal-looking key).
-    actions   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
-    resources = ["${local.fdn.backups_bucket_arn}/${var.client_name}/*"]
+    # must never sit at a normal-looking key). backups/ prefix matches
+    # the lifecycle rule's scope (audit round 2); AbortMultipartUpload
+    # lets a failed streaming upload clean its own parts.
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:DeleteObject",
+      "s3:AbortMultipartUpload",
+    ]
+    resources = ["${local.fdn.backups_bucket_arn}/backups/${var.client_name}/*"]
   }
 
   statement {

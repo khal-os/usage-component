@@ -50,6 +50,12 @@ data "aws_iam_policy_document" "ecr_push" {
   statement {
     sid = "EcrPush"
     actions = [
+      # DescribeImages (audit round 2): both the build workflow's
+      # rerun-skip check and the deploy script's existence gate call it —
+      # without it, reruns always failed (AccessDenied read as "absent" →
+      # rebuild → refused by the immutable tag) and workflow deploys
+      # could never pass their own gate.
+      "ecr:DescribeImages",
       "ecr:BatchCheckLayerAvailability",
       "ecr:CompleteLayerUpload",
       "ecr:InitiateLayerUpload",

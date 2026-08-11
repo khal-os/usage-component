@@ -2,7 +2,7 @@
 # State lives in S3: `terraform init -backend-config=backend.hcl`
 # (see backend.hcl.example; the bucket is bootstrapped by hand, README §1).
 terraform {
-  required_version = ">= 1.9"
+  required_version = ">= 1.10" # use_lockfile backend — same floor as tenant/
 
   required_providers {
     aws = {
