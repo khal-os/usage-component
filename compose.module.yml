@@ -1,4 +1,4 @@
-# THE MODULE — the platform's own services: api + ui. (The
+# THE MODULE — the platform's own service: the api. (The
 # trace-ingestion-worker lives in compose.connector.yml: it scales with
 # the connector, not with the module — one ingestor per LangWatch stack.)
 #
@@ -98,33 +98,6 @@ services:
       resources:
         limits:
           memory: 512m
-
-  ui:
-    image: ${UI_IMAGE:-platform-ui:local}
-    container_name: ${CLIENT_NAME}-ui
-    environment:
-      CLIENT_NAME: ${CLIENT_NAME} # substituted into the nginx template (/client.json)
-      CLIENT_TIMEZONE: ${CLIENT_TIMEZONE} # decision 130 — shown as the header zone label
-    ports:
-      # Same loopback default as the api. The UI is the client-facing
-      # surface, so UI_BIND=0.0.0.0 is the override that may legitimately
-      # be needed — still behind a firewall (the UI proxies the auth-less
-      # API); see clients/example.env.
-      - "${UI_BIND:-127.0.0.1}:${UI_PORT:-8080}:80"
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ > /dev/null || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 64m
 
   # T6 continuous form (decision 131): the billing-close scheduler. Closes
   # every fully-past client-calendar month through the ONE close use case

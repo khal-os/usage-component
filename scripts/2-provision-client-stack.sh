@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# STEP 2 — provision: images (built only if missing) → stack up (9
+# STEP 2 — provision: images (built only if missing) → stack up (8
 # containers, dev form) → API health → migrations → LangWatch health.
 # Idempotent: a stack already up is a fast no-op pass. First LangWatch
 # boot runs its own migrations and takes a few minutes.
@@ -22,9 +22,7 @@ API_PORT="$(host_port API_PORT)"; LANGWATCH_PORT="$(host_port LANGWATCH_PORT)"
 # ---------- images ----------
 docker image inspect "$(get MODULE_IMAGE)" > /dev/null 2>&1 \
   && docker image inspect "$(get CONNECTOR_IMAGE)" > /dev/null 2>&1 \
-  || { step "buildando imagens (module + connector + ui)"; live make build || die "build falhou"; }
-docker image inspect platform-ui:local > /dev/null 2>&1 \
-  || { step "buildando imagem da UI"; live docker build -f docker/ui.Dockerfile -t platform-ui:local . || die "build da UI falhou"; }
+  || { step "buildando imagens (module + connector)"; live make build || die "build falhou"; }
 
 # ---------- stack ----------
 # SEM `live` de propósito: atrás de um pipe o compose degrada para linhas

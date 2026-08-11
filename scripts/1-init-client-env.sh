@@ -10,7 +10,6 @@
 #
 #   --api-port N          host port for the API        (default: first free from 3001)
 #   --langwatch-port N    host port for LangWatch      (default: first free from 5561)
-#   --ui-port N           host port for the client UI  (default: first free from 8081)
 #   --mongo-host-port N   dev-only Compass port        (default: first free from 27018)
 #   --mongo-user U        enable mongo auth (with --mongo-pass; BEFORE first boot)
 #   --mongo-pass P
@@ -26,7 +25,7 @@ source scripts/deploy-lib.sh
 require_name "${1:-}"; shift || true
 banner 1 "env — contrato do cliente"
 
-API_PORT="" LANGWATCH_PORT="" UI_PORT="" MONGO_HOST_PORT="" MONGO_USER="" MONGO_PASS=""
+API_PORT="" LANGWATCH_PORT="" MONGO_HOST_PORT="" MONGO_USER="" MONGO_PASS=""
 IMAGE="platform-module:local" CONNECTOR_IMAGE_REF="platform-connector:local"
 declare -a ENV_OVERRIDES=()
 
@@ -34,7 +33,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --api-port)        API_PORT="$2"; shift 2 ;;
     --langwatch-port)  LANGWATCH_PORT="$2"; shift 2 ;;
-    --ui-port)         UI_PORT="$2"; shift 2 ;;
     --mongo-host-port) MONGO_HOST_PORT="$2"; shift 2 ;;
     --mongo-user)      MONGO_USER="$2"; shift 2 ;;
     --mongo-pass)      MONGO_PASS="$2"; shift 2 ;;
@@ -50,7 +48,7 @@ done
 
 # ---------- port allocation (skip ports used by env files or listeners) ----------
 used_ports() {
-  grep -hoE '^(API_PORT|LANGWATCH_PORT|UI_PORT|MONGO_HOST_PORT)=[0-9]+' clients/*.env 2>/dev/null | grep -oE '[0-9]+$'
+  grep -hoE '^(API_PORT|LANGWATCH_PORT|MONGO_HOST_PORT)=[0-9]+' clients/*.env 2>/dev/null | grep -oE '[0-9]+$'
   ss -ltnH 2>/dev/null | awk '{print $4}' | grep -oE '[0-9]+$'
 }
 
@@ -67,10 +65,9 @@ if [[ -f "$ENVFILE" ]]; then
 else
   API_PORT="${API_PORT:-$(next_free 3001)}"
   LANGWATCH_PORT="${LANGWATCH_PORT:-$(next_free 5561)}"
-  UI_PORT="${UI_PORT:-$(next_free 8081)}"
   MONGO_HOST_PORT="${MONGO_HOST_PORT:-$(next_free 27018)}"
   step "env: criando ${ENVFILE}"
-  info "portas: api ${API_PORT} · ui ${UI_PORT} · langwatch ${LANGWATCH_PORT} · mongo-dev ${MONGO_HOST_PORT}"
+  info "portas: api ${API_PORT} · langwatch ${LANGWATCH_PORT} · mongo-dev ${MONGO_HOST_PORT}"
   cat > "$ENVFILE" << EOF
 # Gerado por 1-init-client-env.sh em $(date -u +%FT%TZ) — contrato: clients/example.production.env
 COMPOSE_PROJECT_NAME=${NAME}
@@ -83,7 +80,6 @@ CLIENT_TIMEZONE=${CLIENT_TIMEZONE:-America/Sao_Paulo}
 
 API_PORT=${API_PORT}
 LANGWATCH_PORT=${LANGWATCH_PORT}
-UI_PORT=${UI_PORT}
 
 # OBRIGATÓRIO (compose recusa vazio): URL de LangWatch visível no NAVEGADOR.
 # Deploy público: troque pela URL do reverse proxy (deploy/RUNBOOK-VM.md),

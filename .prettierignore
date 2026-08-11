@@ -6,7 +6,6 @@ demo-data
 docs
 deploy
 clients
-packages/ui
 loadtest
 *.md
 Makefile

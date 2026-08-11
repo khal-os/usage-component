@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "npm run build -w @observability/core && npm run build -w @observability/module -w @observability/connector -w @observability/ui",
+    "build": "npm run build -w @observability/core && npm run build -w @observability/module -w @observability/connector",
     "bump": "./scripts/bump-version.sh",
     "register-module": "./scripts/register-module.sh",
     "test": "npm run test --workspaces --if-present",

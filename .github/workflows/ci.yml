@@ -1,4 +1,4 @@
-# CI for the observability component (module · connector · core · ui).
+# CI for the observability component (module · connector · core).
 #
 # Mirrors the local gates exactly — pre-commit (lint-staged), commit-msg
 # (commitlint) and pre-push (typecheck + lint + unit) are the fast local

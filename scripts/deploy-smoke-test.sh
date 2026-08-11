@@ -60,7 +60,7 @@ chmod +x "${STUBS}/docker"
 # The minimal env file the contract sanctions: identity + the required
 # client clock (decision 130) + the required browser-visible LangWatch URL
 # (compose refuses to interpolate without it). No API_PORT,
-# no LANGWATCH_PORT, no UI_PORT — exactly the "dedicated host, omit them"
+# no LANGWATCH_PORT — exactly the "dedicated host, omit them"
 # case of clients/example.production.env.
 cat > "$ENVFILE" <<EOF
 COMPOSE_PROJECT_NAME=${SLUG}
@@ -107,7 +107,6 @@ case_ "B · portas omitidas: toda URL construída continua bem-formada"
 
   [[ "$(host_port API_PORT)"       == "3000" ]] || { echo "API_PORT sem default"; exit 1; }
   [[ "$(host_port LANGWATCH_PORT)" == "5560" ]] || { echo "LANGWATCH_PORT sem default"; exit 1; }
-  [[ "$(host_port UI_PORT)"        == "8080" ]] || { echo "UI_PORT sem default"; exit 1; }
 
   # The exact URL the auth fail-closed check curls (5-verify-client.sh).
   url="http://localhost:$(host_port API_PORT)/api/v1/traces"
@@ -158,7 +157,7 @@ fi
 # (register-module.sh's `API_PORT=$(grep '^API_PORT=' … | cut …)` slipped
 # past the get()-only check for a whole wave). `1-init-client-env.sh` is the
 # env file's WRITER — it allocates ports with next_free and builds no URL.
-RAW_PORT_READS="$(grep -rnE '\$\(get (API_PORT|LANGWATCH_PORT|UI_PORT)\)|(API_PORT|LANGWATCH_PORT|UI_PORT)="?\$\(' \
+RAW_PORT_READS="$(grep -rnE '\$\(get (API_PORT|LANGWATCH_PORT)\)|(API_PORT|LANGWATCH_PORT)="?\$\(' \
   --exclude=deploy-smoke-test.sh scripts/ deploy-demo-client.sh \
   | grep -v 'host_port\|next_free' || true)"
 if [[ -n "$RAW_PORT_READS" ]]; then

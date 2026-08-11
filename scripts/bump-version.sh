@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bumps the MODULE version — package.json at the root and in packages/core +
-# packages/module + packages/connector + packages/ui, kept in sync (one
+# packages/module + packages/connector, kept in sync (one
 # logical module, one version). After bumping,
 # push it to the platform with scripts/register-module.sh (the Module Catalog
 # is the source of truth for the deployed module version).
@@ -15,10 +15,10 @@ PART="${1:?usage: bump-version.sh <major|minor|patch>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 OLD=$(node -p "require('$ROOT/package.json').version")
-for pkg in "$ROOT" "$ROOT/packages/core" "$ROOT/packages/module" "$ROOT/packages/connector" "$ROOT/packages/ui"; do
+for pkg in "$ROOT" "$ROOT/packages/core" "$ROOT/packages/module" "$ROOT/packages/connector"; do
   (cd "$pkg" && npm version "$PART" --no-git-tag-version >/dev/null)
 done
 NEW=$(node -p "require('$ROOT/package.json').version")
 
-echo "module version: $OLD → $NEW (root + packages/{core,module,connector,ui})"
+echo "module version: $OLD → $NEW (root + packages/{core,module,connector})"
 echo "Next: re-register so the platform sees it — scripts/register-module.sh"

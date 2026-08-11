@@ -38,7 +38,6 @@ OS; a component = **module + connector** (hence the npm scope
   the LangWatch ClickHouse adapter + the fixture fake (decision 127 —
   no HTTP adapter; ClickHouse is the only real source), syncTraces/
   syncBatches, ingestion bookkeeping repos, worker loop + `run-sync` job.
-- `packages/ui` (`@observability/ui`) — static client UI.
 
 Graph: `module → core ← connector` (never module ↔ connector in production
 code). Docker mirrors it: `platform-module` (vendor-free by construction)
