@@ -5,7 +5,7 @@
 FROM debian:12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates unzip \
-  && curl -fsSL https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian12-x86_64-100.10.0.deb \
+  && curl -fsSL https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian12-x86_64-100.15.0.deb \
        -o /tmp/tools.deb \
   && apt-get install -y /tmp/tools.deb \
   && curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/aws.zip \
