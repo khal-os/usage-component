@@ -10,6 +10,11 @@ variable "state_bucket" {
   type        = string
 }
 
+variable "state_bucket_region" {
+  description = "Region of the state bucket itself — may differ from var.region (fail-fast: no default)."
+  type        = string
+}
+
 variable "client_name" {
   description = "Tenant slug — hostnames, resource names, backup prefix."
   type        = string

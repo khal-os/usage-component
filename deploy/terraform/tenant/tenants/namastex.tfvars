@@ -2,14 +2,15 @@
 # Reuses the existing Atlas M0 database `usage_db` (user decision
 # 2026-08-10) — the permanent archive carries over untouched.
 
-region       = "us-east-1"
-state_bucket = "namastex-usage-tfstate-648426765611"
+region              = "sa-east-1"
+state_bucket        = "namastex-usage-tfstate-648426765611"
+state_bucket_region = "us-east-1"
 
 client_name         = "namastex"
 client_timezone     = "America/Sao_Paulo"
 mongo_usage_db_name = "usage_db"
 
-image_sha = "901f8a78ee8df206805f6c2dcf7d4be629c33abc"
+image_sha = "a4d76c89c6a4218015dde6785506e1596e49fcd6"
 
 # Decision 141: interim Basic gate until the KHAL quartet has real infra.
 enable_basic_auth = true

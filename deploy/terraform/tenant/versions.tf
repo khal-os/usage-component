@@ -35,7 +35,9 @@ data "terraform_remote_state" "foundation" {
   config = {
     bucket = var.state_bucket
     key    = "usage-component/foundation.tfstate"
-    region = var.region
+    # The bucket's own region, NOT var.region — the platform can deploy to
+    # a region other than the one holding the state bucket.
+    region = var.state_bucket_region
   }
 }
 

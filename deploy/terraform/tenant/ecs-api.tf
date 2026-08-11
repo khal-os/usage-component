@@ -67,7 +67,8 @@ resource "aws_vpc_security_group_ingress_rule" "api_from_alb" {
 
 resource "aws_security_group" "workers" {
   name_prefix = "${local.name}-workers-"
-  description = "connector/scheduler/backup — egress only"
+  # EC2 SG-description charset has no apostrophe and no non-ASCII
+  description = "connector/scheduler/backup egress only"
   vpc_id      = aws_vpc.main.id
 
   egress {
