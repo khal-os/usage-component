@@ -2,7 +2,7 @@
 # stream it gzipped to S3, exit non-zero on ANY failure (the EventBridge
 # rule turns that into an alert — a backup that fails silently is worse
 # than none).
-FROM debian:12-slim
+FROM debian:13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates unzip \
   && curl -fsSL https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian12-x86_64-100.15.0.deb \
