@@ -22,3 +22,13 @@ backups/
 *.tfstate.*
 deploy/terraform/**/backend.hcl
 deploy/terraform/**/*.auto.tfvars
+
+# jest --json output from test:ci — dashboard input, never committed
+packages/*/jest-results.json
+
+# PR-dashboard runtime dirs (CI workspace / local dry-runs)
+.ci-metrics/
+image-metrics/
+.ci-jobs.json
+.dashboard.md
+.docker-dashboard.md
