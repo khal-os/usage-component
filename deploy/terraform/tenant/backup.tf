@@ -78,7 +78,7 @@ resource "aws_scheduler_schedule" "backup" {
       launch_type         = "FARGATE"
 
       network_configuration {
-        subnets         = local.fdn.private_subnet_ids
+        subnets         = aws_subnet.private[*].id
         security_groups = [aws_security_group.workers.id]
       }
     }

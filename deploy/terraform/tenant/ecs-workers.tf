@@ -49,7 +49,7 @@ resource "aws_ecs_service" "connector" {
   deployment_maximum_percent         = 100
 
   network_configuration {
-    subnets         = local.fdn.private_subnet_ids
+    subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.workers.id]
   }
 
@@ -102,7 +102,7 @@ resource "aws_ecs_service" "scheduler" {
   deployment_maximum_percent         = 100
 
   network_configuration {
-    subnets         = local.fdn.private_subnet_ids
+    subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.workers.id]
   }
 

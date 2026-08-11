@@ -25,6 +25,16 @@ variable "client_timezone" {
   type        = string
 }
 
+variable "vpc_cidr" {
+  description = <<-EOT
+    This tenant's own VPC (decision 142). The same CIDR across tenants is
+    deliberate — tenant VPCs are NEVER peered; if that ever changes,
+    re-IP first.
+  EOT
+  type        = string
+  default     = "10.80.0.0/16"
+}
+
 variable "image_sha" {
   description = "Git SHA tag of the platform images to run (built by build-images)."
   type        = string

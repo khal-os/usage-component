@@ -15,14 +15,14 @@ data "aws_ami" "al2023" {
 
 resource "aws_security_group" "langwatch" {
   name_prefix = "${local.name}-langwatch-"
-  vpc_id      = local.fdn.vpc_id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     description     = "LangWatch app (UI + OTLP ingest) from the ALB"
     from_port       = 5560
     to_port         = 5560
     protocol        = "tcp"
-    security_groups = [local.fdn.alb_security_group_id]
+    security_groups = [aws_security_group.alb.id]
   }
 
   ingress {
@@ -100,7 +100,7 @@ resource "aws_iam_instance_profile" "langwatch" {
 resource "aws_instance" "langwatch" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.langwatch_instance_type
-  subnet_id              = local.fdn.private_subnet_ids[0]
+  subnet_id              = aws_subnet.private[0].id
   vpc_security_group_ids = [aws_security_group.langwatch.id]
   iam_instance_profile   = aws_iam_instance_profile.langwatch.name
 
@@ -143,7 +143,7 @@ resource "aws_lb_target_group" "langwatch" {
   name        = substr("${local.name}-lw", 0, 32)
   port        = 5560
   protocol    = "HTTP"
-  vpc_id      = local.fdn.vpc_id
+  vpc_id      = aws_vpc.main.id
   target_type = "instance"
 
   health_check {
@@ -159,8 +159,8 @@ resource "aws_lb_target_group_attachment" "langwatch" {
 }
 
 resource "aws_lb_listener_rule" "langwatch" {
-  listener_arn = local.fdn.https_listener_arn
-  priority     = local.rule_priority_base + 1
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 101
 
   action {
     type             = "forward"
@@ -180,8 +180,8 @@ resource "aws_route53_record" "langwatch" {
   type    = "A"
 
   alias {
-    name                   = local.fdn.alb_dns_name
-    zone_id                = local.fdn.alb_zone_id
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
     evaluate_target_health = true
   }
 }

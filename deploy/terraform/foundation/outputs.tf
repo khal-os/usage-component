@@ -1,24 +1,9 @@
-# Everything the tenant module (Phase 2) consumes, read via
-# terraform_remote_state — the foundation's outputs ARE its contract.
+# Everything the tenant module consumes, read via terraform_remote_state —
+# the foundation's outputs ARE its contract. Decision 142: no network here;
+# each tenant builds its own VPC/NAT/ALB and only borrows the shared
+# data-free pieces below.
 output "region" {
   value = var.region
-}
-
-output "vpc_id" {
-  value = aws_vpc.main.id
-}
-
-output "public_subnet_ids" {
-  value = aws_subnet.public[*].id
-}
-
-output "private_subnet_ids" {
-  value = aws_subnet.private[*].id
-}
-
-output "nat_egress_ip" {
-  description = "The single egress IP — what Atlas network access must allowlist."
-  value       = aws_eip.nat.public_ip
 }
 
 output "ecs_cluster_arn" {
@@ -33,27 +18,6 @@ output "ecr_repository_urls" {
   value = { for k, r in aws_ecr_repository.images : k => r.repository_url }
 }
 
-output "alb_arn" {
-  value = aws_lb.main.arn
-}
-
-output "alb_dns_name" {
-  value = aws_lb.main.dns_name
-}
-
-output "alb_zone_id" {
-  value = aws_lb.main.zone_id
-}
-
-output "alb_security_group_id" {
-  value = aws_security_group.alb.id
-}
-
-output "https_listener_arn" {
-  description = "Tenant modules attach their host-header rules here."
-  value       = aws_lb_listener.https.arn
-}
-
 output "route53_zone_id" {
   value = aws_route53_zone.main.zone_id
 }
@@ -65,6 +29,11 @@ output "route53_name_servers" {
 
 output "base_domain" {
   value = var.base_domain
+}
+
+output "wildcard_certificate_arn" {
+  description = "Attached by every tenant's own ALB (validated *.base_domain)."
+  value       = aws_acm_certificate_validation.wildcard.certificate_arn
 }
 
 output "backups_bucket_name" {

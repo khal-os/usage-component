@@ -9,18 +9,21 @@ tenant, nothing defaults).
 
 ## Layout
 
-- Foundation (once): `deploy/terraform/foundation` — VPC/NAT, ECS cluster
-  `usage-main`, ECR, ALB + wildcard cert, Route53 zone, CI role, backups
-  bucket, `usage-alerts` SNS topic.
-- Tenant (per client): `deploy/terraform/tenant` — api/connector/scheduler
-  Fargate services, nightly backup task, LangWatch EC2, secret shell,
-  hostnames `<client>-api.<domain>` / `<client>-langwatch.<domain>`.
+- Foundation (once): `deploy/terraform/foundation` — ECS cluster
+  `usage-main`, ECR, wildcard cert, Route53 zone, CI role, backups bucket,
+  `usage-alerts` SNS topic. NO network (decision 142).
+- Tenant (per client): `deploy/terraform/tenant` — its OWN VPC/NAT/ALB
+  (complete isolation, per-client egress IP for the Atlas allowlist —
+  decision 142), api/connector/scheduler Fargate services, nightly backup
+  task, LangWatch EC2, secret shell, hostnames `<client>-api.<domain>` /
+  `<client>-langwatch.<domain>`.
 
 ## Onboard a tenant
 
 1. **Atlas (manual, once per client):** create project + cluster (Flex to
    start; M10+PrivateLink is the posture upgrade), a db user, and allowlist
-   the NAT egress IP (foundation output `nat_egress_ip`).
+   THIS tenant's NAT egress IP (tenant output `nat_egress_ip` — per-client,
+   decision 142; available only after the tenant apply, so allowlist then).
 2. **Terraform:**
    ```bash
    cd deploy/terraform/tenant
