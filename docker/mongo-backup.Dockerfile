@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
   && apt-get purge -y unzip \
   && rm -rf /tmp/* /var/lib/apt/lists/*
 
-COPY docker/backup-entrypoint.sh /entrypoint.sh
+COPY docker/mongo-backup-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 CMD ["/entrypoint.sh"]

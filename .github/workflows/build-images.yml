@@ -22,7 +22,7 @@ jobs:
       # ECR-existence guard is what decides deployability of a SHA).
       fail-fast: false
       matrix:
-        image: [module, connector, backup]
+        image: [module, connector, mongo-backup]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

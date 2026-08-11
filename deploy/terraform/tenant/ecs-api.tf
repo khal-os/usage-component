@@ -4,7 +4,7 @@
 locals {
   module_image = "${local.fdn.ecr_repository_urls["platform-module"]}:${var.image_sha}"
   conn_image   = "${local.fdn.ecr_repository_urls["platform-connector"]}:${var.image_sha}"
-  backup_image = "${local.fdn.ecr_repository_urls["platform-backup"]}:${var.image_sha}"
+  backup_image = "${local.fdn.ecr_repository_urls["platform-mongo-backup"]}:${var.image_sha}"
 
   mongo_env = [
     { name = "MONGO_DB_ATLAS", value = "true" },
