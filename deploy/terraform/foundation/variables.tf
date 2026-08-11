@@ -13,12 +13,6 @@ variable "base_domain" {
   type        = string
 }
 
-variable "vpc_cidr" {
-  description = "CIDR of the shared VPC."
-  type        = string
-  default     = "10.80.0.0/16"
-}
-
 variable "github_oidc_subjects" {
   description = <<-EOT
     GitHub OIDC subject claims allowed to assume the CI role — pushes to

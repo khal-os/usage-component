@@ -1,58 +1,99 @@
 #!/bin/bash
-# Boot the tenant's LangWatch stack (decision 140). The env file is
-# DISPOSABLE OUTPUT — regenerated from Secrets Manager + declared knobs on
-# every boot; the source of truth is never a file on this box (the lesson
-# of the 2026-08-05 clobber incident).
+# ONE-TIME install (cloud-init runs user-data once per instance — the
+# per-boot work lives in langwatch-bootstrap.service, which re-fetches
+# compose/secret/capacity from S3/SM/SSM on EVERY start and retries on
+# failure). This script contains only STABLE values, so capacity retunes
+# never replace the instance.
 set -euo pipefail
 
 dnf install -y docker jq
 systemctl enable --now docker
 
-# docker compose plugin (AL2023 has no package for it)
 mkdir -p /usr/local/lib/docker/cli-plugins
 curl -fsSL "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
 mkdir -p /opt/langwatch
-cd /opt/langwatch
 
-cat > compose.yml <<'COMPOSE_EOF'
-${compose_file}
-COMPOSE_EOF
-
-SECRET_JSON=$(aws secretsmanager get-secret-value \
-  --secret-id "${secret_arn}" --region "${region}" \
-  --query SecretString --output text)
-
-cat > .env <<ENV_EOF
+cat > /opt/langwatch/tenant.conf <<'CONF_EOF'
 CLIENT_NAME=${client_name}
+REGION=${region}
+SECRET_ARN=${secret_arn}
+CAPACITY_PARAM=${capacity_param}
+COMPOSE_S3_URI=${compose_s3_uri}
+BOOTSTRAP_S3_URI=${bootstrap_s3_uri}
 LANGWATCH_PUBLIC_URL=${langwatch_public_url}
-LW_NEXTAUTH_SECRET=$(echo "$SECRET_JSON" | jq -r .LW_NEXTAUTH_SECRET)
-LW_API_TOKEN_JWT_SECRET=$(echo "$SECRET_JSON" | jq -r .LW_API_TOKEN_JWT_SECRET)
-LW_CREDENTIALS_SECRET=$(echo "$SECRET_JSON" | jq -r .LW_CREDENTIALS_SECRET)
-LANGWATCH_WORKERS_REPLICAS=${langwatch_workers_replicas}
-LANGWATCH_MEMORY_LIMIT=${langwatch_memory_limit}
-LW_REDIS_MEMORY_LIMIT=${lw_redis_memory_limit}
-LW_CLICKHOUSE_MEMORY_LIMIT=${lw_clickhouse_memory_limit}
-LW_CLICKHOUSE_CPU_LIMIT=${lw_clickhouse_cpu_limit}
-ENV_EOF
-chmod 600 .env
+CONF_EOF
+chmod 600 /opt/langwatch/tenant.conf
 
-docker compose --env-file .env up -d
-
-# Queue-backlog metric (decision 139): redis container memory percent,
-# published every minute — the alarm watches this. treat_missing_data =
-# breaching, so if this cron dies the alarm fires too.
-cat > queue-metric.sh <<'METRIC_EOF'
+# The runner: pulls the CURRENT bootstrap from S3, then executes it — a
+# bootstrap bugfix is a terraform apply + service restart, never an
+# instance replacement.
+cat > /opt/langwatch/run-bootstrap.sh <<'RUN_EOF'
 #!/bin/bash
-PCT=$(docker stats --no-stream --format '{{.MemPerc}}' ${client_name}-langwatch-redis | tr -d '%')
+set -euo pipefail
+source /opt/langwatch/tenant.conf
+aws s3 cp "$BOOTSTRAP_S3_URI" /opt/langwatch/bootstrap.sh --region "$REGION"
+chmod +x /opt/langwatch/bootstrap.sh
+exec /opt/langwatch/bootstrap.sh
+RUN_EOF
+chmod +x /opt/langwatch/run-bootstrap.sh
+
+cat > /etc/systemd/system/langwatch-bootstrap.service <<'UNIT_EOF'
+[Unit]
+Description=LangWatch stack bootstrap (regenerates env from SM/SSM, compose up)
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+ExecStart=/opt/langwatch/run-bootstrap.sh
+# First boot legitimately races the operator filling the tenant secret —
+# retry until it lands (the self-heal the old once-only user-data lacked).
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+# Queue-backlog metric via systemd timer (AL2023 has NO cron daemon — a
+# cron.d file would be inert and the missing-data alarm would sit
+# permanently red).
+cat > /opt/langwatch/queue-metric.sh <<'METRIC_EOF'
+#!/bin/bash
+source /opt/langwatch/tenant.conf
+PCT=$(docker stats --no-stream --format '{{.MemPerc}}' "$CLIENT_NAME-langwatch-redis" 2>/dev/null | tr -d '%')
 [ -n "$PCT" ] && aws cloudwatch put-metric-data \
-  --region ${region} \
+  --region "$REGION" \
   --namespace Usage/LangWatch \
   --metric-name RedisUsedMemoryPercent \
-  --dimensions Tenant=${client_name} \
+  --dimensions Tenant="$CLIENT_NAME" \
   --value "$PCT"
 METRIC_EOF
-chmod +x queue-metric.sh
-echo "* * * * * root /opt/langwatch/queue-metric.sh >/dev/null 2>&1" > /etc/cron.d/langwatch-queue-metric
+chmod +x /opt/langwatch/queue-metric.sh
+
+cat > /etc/systemd/system/langwatch-queue-metric.service <<'UNIT_EOF'
+[Unit]
+Description=Publish LangWatch redis queue metric
+
+[Service]
+Type=oneshot
+ExecStart=/opt/langwatch/queue-metric.sh
+UNIT_EOF
+
+cat > /etc/systemd/system/langwatch-queue-metric.timer <<'UNIT_EOF'
+[Unit]
+Description=LangWatch queue metric every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+UNIT_EOF
+
+systemctl daemon-reload
+systemctl enable --now langwatch-bootstrap.service langwatch-queue-metric.timer

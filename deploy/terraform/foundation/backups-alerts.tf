@@ -62,6 +62,14 @@ data "aws_iam_policy_document" "alerts_topic" {
       type        = "Service"
       identifiers = ["events.amazonaws.com", "cloudwatch.amazonaws.com"]
     }
+
+    # Review fix: without this, ANY AWS account's EventBridge/CloudWatch
+    # could publish spoofed alerts to the fleet topic.
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
   }
 }
 

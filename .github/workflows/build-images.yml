@@ -18,6 +18,9 @@ jobs:
   build-push:
     runs-on: ubuntu-latest
     strategy:
+      # One failing leg must not cancel the others (the deploy script's
+      # ECR-existence guard is what decides deployability of a SHA).
+      fail-fast: false
       matrix:
         image: [module, connector, backup]
     steps:

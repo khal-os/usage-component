@@ -102,7 +102,7 @@ data "aws_iam_policy_document" "ecs_deploy" {
   statement {
     sid       = "PassTenantRoles"
     actions   = ["iam:PassRole"]
-    resources = ["arn:${data.aws_partition.current.partition}:iam::*:role/usage-*"]
+    resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/usage-*"]
 
     condition {
       test     = "StringEquals"

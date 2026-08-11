@@ -148,9 +148,8 @@ aws secretsmanager put-secret-value --secret-id usage/namastex --secret-string '
   presentation audience/dashboards will type). Read it back anytime:
   `aws secretsmanager get-secret-value --secret-id usage/namastex --query SecretString --output text | jq`
 - ⚠ LW_CREDENTIALS_SECRET must NEVER change after LangWatch's first boot.
-- Reboot the LangWatch EC2 once so user-data re-reads the secret:
-  `aws ec2 reboot-instances --instance-ids <id>` (find id: tag Name
-  `usage-namastex-langwatch`).
+- The EC2 self-heals: `langwatch-bootstrap.service` retries every 30s until
+  the secret exists, then brings the stack up — no reboot, no action.
 
 ## 8 · First deploy
 
@@ -253,9 +252,11 @@ when the gate runs.
 | `BASIC_AUTH_PASSWORD` | generate: `openssl rand -base64 24` | ⚠ save where humans find it — it's the presentation login |
 
 Who reads this secret: the api task (mongo + basic-auth keys), connector/
-scheduler/backup tasks (mongo keys), and the LangWatch EC2 at boot (LW_ keys
-→ regenerated `/opt/langwatch/.env`). After EDITING the secret: reboot the
-EC2 and `--force-new-deployment` the services — tasks read it at start only.
+scheduler/backup tasks (mongo keys), and the LangWatch EC2's bootstrap
+service (LW_ keys → regenerated `/opt/langwatch/.env` on every service
+start). After EDITING the secret: `systemctl restart langwatch-bootstrap`
+on the instance (via SSM) and `--force-new-deployment` the ECS services —
+tasks read it at start only.
 
 ### C · Post-onboarding parameter (step 10)
 

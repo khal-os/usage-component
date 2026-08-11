@@ -34,6 +34,11 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Deploy
+        # Inputs via env, never interpolated into the script body (review
+        # fix: a crafted input would otherwise execute in a job holding
+        # the deploy role); the script also regex-validates both.
+        env:
+          CLIENT: ${{ inputs.client }}
+          SHA: ${{ inputs.sha || github.sha }}
         run: |
-          bash deploy/scripts/deploy-tenant.sh \
-            "${{ inputs.client }}" "${{ inputs.sha || github.sha }}"
+          bash deploy/scripts/deploy-tenant.sh "$CLIENT" "$SHA"

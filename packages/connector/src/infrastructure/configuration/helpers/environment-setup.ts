@@ -99,7 +99,15 @@ const envSchema = z
     LANGWATCH_CLICKHOUSE_USER: z.string().optional(),
     LANGWATCH_CLICKHOUSE_PASSWORD: z.string().optional(),
     LANGWATCH_CLICKHOUSE_DATABASE: z.string().optional(),
-    LANGWATCH_PROJECT_ID: z.string().optional(),
+    // Whitespace-only means UNSET (decision 142 wiring): ECS injects this
+    // from an SSM parameter whose pre-onboarding placeholder is " " — SSM
+    // forbids empty strings. A blank project id must gate the source OFF
+    // (crash path), never filter by ' ' (silent zero-ingest) and never
+    // drop the filter (cross-project ingest) — audit G-1.
+    LANGWATCH_PROJECT_ID: z
+      .string()
+      .optional()
+      .transform((value) => value?.trim() || undefined),
     TRACE_INGESTION_INTERVAL_SECONDS: optionalBoundedIntString(
       'TRACE_INGESTION_INTERVAL_SECONDS',
       86_400,

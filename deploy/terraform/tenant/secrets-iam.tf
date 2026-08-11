@@ -82,8 +82,22 @@ resource "aws_iam_role" "backup_task" {
 
 data "aws_iam_policy_document" "backup_s3" {
   statement {
-    actions   = ["s3:PutObject"]
+    # tmp-key upload + rename-on-success (review fix: a truncated dump
+    # must never sit at a normal-looking key).
+    actions   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
     resources = ["${local.fdn.backups_bucket_arn}/${var.client_name}/*"]
+  }
+
+  statement {
+    # The success heartbeat the 25h backstop alarm watches.
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["Usage/Backup"]
+    }
   }
 }
 

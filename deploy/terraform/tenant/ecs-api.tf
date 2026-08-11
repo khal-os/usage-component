@@ -38,16 +38,12 @@ locals {
 # ── Security groups ──────────────────────────────────────────────────────────
 
 # The api receives from the ALB only; workers receive nothing.
+# Cross-SG references live in standalone rule resources (review fix:
+# an inline rule referencing another SG deadlocks that SG's
+# create_before_destroy replacement with a DependencyViolation).
 resource "aws_security_group" "api" {
   name_prefix = "${local.name}-api-"
   vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
 
   egress {
     from_port   = 0
@@ -59,6 +55,14 @@ resource "aws_security_group" "api" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_from_alb" {
+  security_group_id            = aws_security_group.api.id
+  referenced_security_group_id = aws_security_group.alb.id
+  from_port                    = 3000
+  to_port                      = 3000
+  ip_protocol                  = "tcp"
 }
 
 resource "aws_security_group" "workers" {

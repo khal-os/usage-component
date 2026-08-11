@@ -15,8 +15,11 @@ variable "client_name" {
   type        = string
 
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{1,30}$", var.client_name))
-    error_message = "client_name must be a lowercase slug (hostnames and resource names derive from it)."
+    # ≤ 22 chars so "usage-<name>-api" fits AWS's 32-char ALB/TG name
+    # limit WITHOUT truncation (review fix: substr could cut to a
+    # trailing '-' or collide two tenants' names).
+    condition     = can(regex("^[a-z][a-z0-9-]{1,21}$", var.client_name))
+    error_message = "client_name must be a lowercase slug of at most 22 chars (usage-<name>-api must fit AWS's 32-char name limits)."
   }
 }
 
