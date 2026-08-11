@@ -91,6 +91,11 @@ data "aws_iam_policy_document" "backup_s3" {
       "s3:GetObject",
       "s3:DeleteObject",
       "s3:AbortMultipartUpload",
+      # `aws s3 mv` (the rename-on-success) copies tagging with the object;
+      # without these the dump succeeds but the rename dies AccessDenied
+      # (found live 2026-08-11, first sa-east-1 backup run).
+      "s3:GetObjectTagging",
+      "s3:PutObjectTagging",
     ]
     resources = ["${local.fdn.backups_bucket_arn}/backups/${var.client_name}/*"]
   }
