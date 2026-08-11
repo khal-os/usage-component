@@ -25,7 +25,7 @@
 # - Every workspace package.json must be present for npm ci to resolve the
 #   workspace graph, even packages this image never runs.
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
@@ -43,7 +43,7 @@ RUN npm run build --workspace=@observability/module \
   && ! grep -rqiE 'langwatch|clickhouse' packages/module/dist \
   || (echo 'VENDOR LEAK: connector code or a vendor string is in the module image (audit G-5)'; exit 1)
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production \
     DOTENV_CONFIG_QUIET=true
 WORKDIR /app
