@@ -5,7 +5,7 @@
 #
 # Adds build blocks so `... up --build` / `make build` can produce the
 # images locally (production references prebuilt ${MODULE_IMAGE} /
-# ${CONNECTOR_IMAGE} / ${UI_IMAGE}), and mounts the generated demo fixtures
+# ${CONNECTOR_IMAGE}), and mounts the generated demo fixtures
 # over the CONNECTOR image's fixture directory, so the fixture-backed fake
 # sync (explicit TRACE_SOURCE=fixtures, decisão 127) serves THIS client's
 # demo traffic.
@@ -23,11 +23,6 @@ services:
       dockerfile: docker/connector.Dockerfile
     volumes:
       - ./demo-data/${CLIENT_NAME}:/app/packages/connector/src/infrastructure/traceSource/fixtures:ro
-
-  ui:
-    build:
-      context: .
-      dockerfile: docker/ui.Dockerfile
 
 # The dev mongo fragment (Compass/mongosh port) lives in
 # compose.mongodb.dev.yml, NOT here: this overlay must stay valid when the

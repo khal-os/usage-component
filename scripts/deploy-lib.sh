@@ -52,16 +52,15 @@ row()  { printf '   %s%-12s%s %s\n' "$B" "$1" "$RST" "$2"; }
 # OPERAÇÃO · onboarding → CREDENCIAIS · seed → DADOS.
 
 summary_access() {
-  local api_port ui_port mongo_port ui_url lw_url
-  api_port="$(host_port API_PORT)"; ui_port="$(host_port UI_PORT)"
+  local api_port mongo_port api_url lw_url
+  api_port="$(host_port API_PORT)"
   mongo_port="$(get MONGO_HOST_PORT)"
   # Public URLs come from the env file — MODULE_PUBLIC_URL is print-only
   # (absent = localhost), LANGWATCH_PUBLIC_URL is the compose-required knob.
-  ui_url="$(get MODULE_PUBLIC_URL)"; lw_url="$(get LANGWATCH_PUBLIC_URL)"
+  api_url="$(get MODULE_PUBLIC_URL)"; lw_url="$(get LANGWATCH_PUBLIC_URL)"
   echo
   printf '  %s\n' "${CYN}ACESSOS${RST}"
-  row "UI"        "${ui_url:-http://localhost:${ui_port}}"
-  row "API"       "http://localhost:${api_port}/api/v1   ${DIM}(loopback — não exposto)${RST}"
+  row "API"       "${api_url:-http://localhost:${api_port}}/api/v1"
   row "API docs"  "http://localhost:${api_port}/api/v1/docs/"
   row "LangWatch" "${lw_url:-${YLW}defina LANGWATCH_PUBLIC_URL em ${ENVFILE}${RST}}"
   # MONGO_HOST_PORT tem default 0 no compose (porta efêmera) — não há URL
@@ -144,7 +143,6 @@ host_port() {
   case "$1" in
     API_PORT)       default=3000 ;;
     LANGWATCH_PORT) default=5560 ;;
-    UI_PORT)        default=8080 ;;
     *) printf '%s\n' "host_port: sem default conhecido para '$1'" >&2; return 1 ;;
   esac
   value="$(get "$1")"

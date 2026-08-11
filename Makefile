@@ -2,7 +2,7 @@
 # CLIENT=<name>, which selects clients/<name>.env (the env contract —
 # see clients/example.production.env; dev shape in example.development.env). Deploying a new client = writing its env file.
 #
-#   make build                                  # build the module+connector+ui images locally
+#   make build                                  # build the module+connector images locally
 #   make up CLIENT=hapvida                      # dev form (build block + demo fixtures)
 #   make up-prod CLIENT=hapvida                 # production form (image ref only)
 #   make migrate CLIENT=hapvida
@@ -43,14 +43,14 @@ ENVFILE = clients/$(CLIENT).env
 # that escapes the scrub silently overrides all client env files at once.
 SCRUB = env -u COMPOSE_PROJECT_NAME -u CLIENT_NAME -u CLIENT_TIMEZONE -u API_PORT \
           -u LANGWATCH_PORT -u LANGWATCH_PUBLIC_URL -u LANGWATCH_PROJECT_ID -u TRACE_SOURCE \
-          -u API_BIND -u LANGWATCH_BIND -u UI_BIND \
+          -u API_BIND -u LANGWATCH_BIND \
           -u KHAL_DISCOVERY_URL -u KHAL_TENANT -u KHAL_CLIENT_ID -u KHAL_CLIENT_SECRET \
           -u BASIC_AUTH_USER -u BASIC_AUTH_PASSWORD \
           -u CORS_ALLOWED_ORIGINS \
           -u MONGO_DB_HOST -u MONGO_DB_PORT -u MONGO_MEMORY_LIMIT \
           -u MONGO_DB_USER -u MONGO_DB_PASSWORD -u MONGO_HOST_PORT -u MONGO_DB_ATLAS \
           -u MONGO_USAGE_DB_NAME \
-          -u MODULE_IMAGE -u CONNECTOR_IMAGE -u UI_IMAGE -u UI_PORT \
+          -u MODULE_IMAGE -u CONNECTOR_IMAGE \
           -u LW_NEXTAUTH_SECRET -u LW_API_TOKEN_JWT_SECRET -u LW_CREDENTIALS_SECRET \
           -u TRACE_INGESTION_INTERVAL_SECONDS -u TRACE_INGESTION_BATCH_SIZE \
           -u TRACE_INGESTION_QUIET_PERIOD_SECONDS -u REPROCESS_INTERVAL_SECONDS \
@@ -61,7 +61,7 @@ SCRUB = env -u COMPOSE_PROJECT_NAME -u CLIENT_NAME -u CLIENT_TIMEZONE -u API_POR
           -u LANGWATCH_WORKERS_MEMORY_LIMIT -u LW_POSTGRES_MEMORY_LIMIT \
           -u LW_REDIS_MEMORY_LIMIT -u LW_CLICKHOUSE_MEMORY_LIMIT \
           -u LW_CLICKHOUSE_CPU_LIMIT
-# Role files (decision 65): module (api+ui) + connector (LangWatch +
+# Role files (decision 65): module (api) + connector (LangWatch +
 # trace-ingestion-worker) + database (mongo) merge into ONE project per
 # client. Couplings live in the file that introduces them, so dropping a
 # role (e.g. external mongo) is a change of THIS list + the client env.
@@ -116,7 +116,6 @@ require-client:
 build:
 	docker build -f docker/module.Dockerfile -t platform-module:local .
 	docker build -f docker/connector.Dockerfile -t platform-connector:local .
-	docker build -f docker/ui.Dockerfile -t platform-ui:local .
 
 # --remove-orphans: a renamed service (e.g. sync-worker →
 # trace-ingestion-worker) would otherwise leave the old container running

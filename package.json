@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "npm run build -w @observability/core && npm run build -w @observability/module -w @observability/connector -w @observability/ui",
+    "build": "npm run build -w @observability/core && npm run build -w @observability/module -w @observability/connector",
     "bump": "./scripts/bump-version.sh",
     "register-module": "./scripts/register-module.sh",
     "test": "npm run test --workspaces --if-present",
@@ -15,7 +15,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:unit:ci": "npm run test:unit:ci --workspaces --if-present",
+    "test:ci:random": "npm run build && node scripts/packaging-check.mjs && npm run test:ci --workspaces --if-present -- --randomize",
     "prepare": "node .husky/install.mjs || true"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "keywords": [],
   "author": "",

@@ -1,0 +1,72 @@
+# PR-time image validation. build-images.yml builds & pushes to ECR only
+# AFTER a merge to main — so a Dockerfile broken by a PR used to surface
+# post-merge (it shipped twice: husky/prepare failures visible only in
+# image builds). This lane builds every image on the PR itself, no push,
+# and Trivy-scans the runtime images. deploy-smoke runs the docker-free
+# deploy-script regression that previously only ran via `make deploy-smoke`.
+name: Docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build platform-${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # One failing image must not hide breakage in the others.
+      fail-fast: false
+      matrix:
+        image: [module, connector, backup]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build (no push)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: docker/${{ matrix.image }}.Dockerfile
+          push: false
+          # load into the local daemon so Trivy can scan the result
+          load: true
+          tags: platform-${{ matrix.image }}:ci
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+      # Blocking on FIXABLE criticals only: a critical with a released fix
+      # is actionable (bump the base image / dep); unfixed upstream CVEs
+      # would block PRs on things no change here can address.
+      - name: Trivy — critical (blocking)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: platform-${{ matrix.image }}:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Trivy — high (report only)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: platform-${{ matrix.image }}:ci
+          severity: HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+          skip-setup-trivy: true
+
+  deploy-smoke:
+    name: Deploy-script smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: ./scripts/deploy-smoke-test.sh

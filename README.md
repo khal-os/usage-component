@@ -13,11 +13,10 @@ client's env file — nothing in the images, the compose files, or the
 application knows any client:
 
 ```
-one client deployment (9 containers, own network, own volumes):
+one client deployment (8 containers, own network, own volumes):
 ┌──────────────────────────────────────────────────────────────┐
-│ ui (:UI_PORT) ──► api (:API_PORT) ──────► mongo (own volume) │
-│  nginx, proxies                              ▲               │
-│  /api same-origin                            │               │
+│ api (:API_PORT) ─────────────────────────► mongo (own volume) │
+│                                              ▲               │
 │                     trace-ingestion-worker ──┘               │
 │                      │  continuous ingestion: watermark      │
 │                      │  loop, price-stamp at write           │
@@ -28,11 +27,10 @@ one client deployment (9 containers, own network, own volumes):
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Default host ports: API `3000`, LangWatch `5560`, UI `8080` — and all three
+Default host ports: API `3000`, LangWatch `5560` — and both
 bind to **loopback by default** (decision 105): reachable from the host only
-via `localhost` unless the client env sets `API_BIND`/`LANGWATCH_BIND`/
-`UI_BIND` explicitly (exposure beyond localhost is a deliberate operator
-act; the UI reaches the api over the compose network, not the host port).
+via `localhost` unless the client env sets `API_BIND`/`LANGWATCH_BIND`
+explicitly (exposure beyond localhost is a deliberate operator act).
 
 Ingestion is **continuous and automatic**: once the client is onboarded
 (`LANGWATCH_PROJECT_ID` set — onboarding writes it), the
@@ -80,15 +78,15 @@ enabled) → **demo data** (deterministic traffic generated for this client,
 PoC price table via `make seed-prices` + premium-model prices, pushed into
 its LangWatch, ingested through the real
 sync — every trace priced between R$ 1 and R$ 100). The summary prints the
-UI, API, LangWatch and Compass URLs plus the login credentials.
+API, LangWatch and Compass URLs plus the login credentials.
 
-Options: `--api-port/--ui-port/--langwatch-port/--mongo-host-port` to pin
+Options: `--api-port/--langwatch-port/--mongo-host-port` to pin
 ports, `--mongo-user/--mongo-pass` for an auth-enabled mongo (before first
 boot), `--image REF` to pin the MODULE image and `--connector-image REF`
 the CONNECTOR image (defaults `platform-module:local` /
 `platform-connector:local` — pin BOTH for a released deploy, or the worker
 falls back to a local tag that exists on no fresh host and crash-loops
-while api+ui stay healthy). Re-running completes/updates a
+while the api stays healthy). Re-running completes/updates a
 deployment — secrets are never regenerated, data is never duplicated.
 
 ## Production deployment
@@ -108,7 +106,7 @@ docker compose -f compose.module.yml -f compose.connector.yml -f compose.mongodb
 docker compose -f compose.module.yml -f compose.connector.yml -f compose.mongodb.yml --env-file <client>.env up -d
 ```
 
-(no `compose.dev.yml`, prebuilt registry images via `MODULE_IMAGE`/`CONNECTOR_IMAGE`/`UI_IMAGE`).
+(no `compose.dev.yml`, prebuilt registry images via `MODULE_IMAGE`/`CONNECTOR_IMAGE`).
 **The order is the contract** (audit G-2): mongo first, migrations against
 it, and only then the full stack — starting the ingestion worker before the
 unique `traceId` index exists opens a window where a re-read stores the same
@@ -205,9 +203,7 @@ System is unreachable or discovery never resolved, requests answer 401
 pre-discovery `AUTH_SYSTEM_*` names were removed before any production
 deployment (decision 133). Nothing configured → the API is open,
 the original PoC behavior.
-`/api/v1/docs` stays open either way (container healthcheck). Note: the
-bundled UI does not send a token yet — turn auth on only for API-only
-deployments for now.
+`/api/v1/docs` stays open either way (container healthcheck).
 
 ## LangWatch (per client, inside the deployment)
 

@@ -40,20 +40,18 @@ const config = {
   coverageProvider: 'v8',
 
   // A list of reporter names that Jest uses when writing coverage reports
-  // coverageReporters: [
-  //   "json",
-  //   "text",
-  //   "lcov",
-  //   "clover"
-  // ],
+  // (jest defaults + json-summary — scripts/coverage-summary.mjs turns the
+  // totals into the CI run-summary table).
+  coverageReporters: ['clover', 'json', 'lcov', 'text', 'json-summary'],
 
   // Ratchet, not aspiration (audit E-5): set just under the measured value
   // so a real coverage DROP fails test:ci while today's tree passes.
   // Raise it as coverage grows — never lower it to make a red run green.
   coverageThreshold: {
     global: {
-      lines: 68,
-      statements: 68,
+      lines: 71,
+      statements: 71,
+      branches: 88,
     },
   },
 
@@ -126,7 +124,12 @@ const config = {
   // projects: undefined,
 
   // Use this configuration option to add custom reporters to Jest
-  // reporters: undefined,
+  // On GitHub Actions, jest's built-in reporter turns each failure into an
+  // inline PR annotation (silent: false keeps console output attached);
+  // 'summary' keeps the end-of-run tally. Local runs keep the default.
+  reporters: process.env.GITHUB_ACTIONS
+    ? [['github-actions', { silent: false }], 'summary']
+    : undefined,
 
   // Automatically reset mock state before every test
   // resetMocks: false,

@@ -6,8 +6,8 @@ import prettierConfig from 'eslint-config-prettier';
  * ONE flat config for the whole workspace (the packages share conventions,
  * so they share the linter — same reasoning as the shared env readers).
  *
- * Scope: the packages' TypeScript sources. UI (static browser JS),
- * loadtest, demo-data and shell scripts are build/ops surfaces with their
+ * Scope: the packages' TypeScript sources. Loadtest, demo-data and
+ * shell scripts are build/ops surfaces with their
  * own rules of engagement — out of lint scope on purpose.
  */
 export default tseslint.config(
@@ -16,10 +16,11 @@ export default tseslint.config(
       '**/dist/**',
       '**/coverage/**',
       '**/node_modules/**',
-      'packages/ui/**',
       'loadtest/**',
       'demo-data/**',
-      'scripts/**',
+      // scripts/*.mjs (spec-check, packaging-check, coverage-summary) are
+      // CI gates — they get linted like everything else. The shell scripts
+      // beside them are out of eslint's jurisdiction anyway.
       'clients/**',
       'deploy/**',
       'docs/**',

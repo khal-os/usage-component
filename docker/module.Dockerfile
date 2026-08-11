@@ -31,7 +31,6 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/module/package.json packages/module/
 COPY packages/connector/package.json packages/connector/
-COPY packages/ui/package.json packages/ui/
 RUN npm ci --workspace=@observability/module
 COPY packages/core/tsconfig.json packages/core/tsconfig.build.json packages/core/
 COPY packages/core/src packages/core/src
@@ -52,8 +51,12 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/module/package.json packages/module/
 COPY packages/connector/package.json packages/connector/
-COPY packages/ui/package.json packages/ui/
-RUN npm ci --workspace=@observability/module --omit=dev && npm cache clean --force
+# npm/corepack/yarn are install tooling — the container only ever runs
+# `node dist/...`. Removing them after the install also removes npm's
+# vendored dependencies (tar et al) from the image's CVE surface.
+RUN npm ci --workspace=@observability/module --omit=dev && npm cache clean --force \
+  && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
+       /usr/local/bin/corepack /opt/yarn* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --from=build /app/packages/core/dist packages/core/dist
 COPY --from=build /app/packages/module/dist packages/module/dist
 

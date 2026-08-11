@@ -1,0 +1,32 @@
+# Weekly dependency PRs. npm minor+patch arrive grouped (one PR to review,
+# CI proves it); majors come alone. github-actions keeps the SHA-pinned
+# workflow actions current; docker tracks the base images under docker/.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - '*'
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+      day: monday

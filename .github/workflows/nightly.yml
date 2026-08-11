@@ -1,0 +1,50 @@
+# Nightly drift & flake detection — things a per-PR run can't see:
+#  · order-dependent tests: the PR suites run in a stable order
+#    (--runInBand); --randomize shuffles test order inside each file's
+#    describe blocks and the file order, so hidden coupling fails HERE
+#    instead of some unlucky future PR.
+#  · vulns published for deps that no PR touched: npm audit on the
+#    whole tree, independent of any manifest diff.
+# Failures arrive as the normal workflow-failure email.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  randomized-tests:
+    name: Full suite, randomized order
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('packages/*/jest-mongodb-config.js') }}
+          restore-keys: |
+            mongodb-binaries-${{ runner.os }}-
+      - run: npm ci
+      - run: npm run test:ci:random
+
+  audit:
+    name: npm audit (high+)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high

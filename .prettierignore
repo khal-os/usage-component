@@ -6,10 +6,11 @@ demo-data
 docs
 deploy
 clients
-packages/ui
 loadtest
 *.md
 Makefile
 *.Dockerfile
 *.yml
 *.yaml
+# jest-mongodb writes this during runs (globalTeardown deletes it) — transient
+packages/*/globalConfig.json
