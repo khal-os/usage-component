@@ -27,13 +27,20 @@ resource "aws_s3_bucket_public_access_block" "backups" {
 resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   bucket = aws_s3_bucket.backups.id
 
-  # Dailies stay hot 35 days, then Glacier; expired after ~13 months.
-  # Versioning + lifecycle beat clever tiering — restores must be boring.
+  # SCOPED to backups/* (audit round 2): an unfiltered rule also governed
+  # the config/<client>/ objects the LangWatch EC2 fetches on every
+  # service start — their day-400 delete marker would have bricked every
+  # later boot. Dailies: hot 35 days → Glacier → delete marker at 400d;
+  # noncurrent versions (the bucket is versioned — "deleted" bytes
+  # otherwise live forever, billed) are truly expired after 35 more days;
+  # abandoned multipart parts (a failed streaming upload) are aborted.
   rule {
-    id     = "age-out"
+    id     = "age-out-backups"
     status = "Enabled"
 
-    filter {}
+    filter {
+      prefix = "backups/"
+    }
 
     transition {
       days          = 35
@@ -42,6 +49,14 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
 
     expiration {
       days = 400
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 35
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }

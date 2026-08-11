@@ -196,7 +196,7 @@ restart the agent. From then on new traces flow into the AWS LangWatch.
       → trace in `GET /traces` with a REAL R$ stamp (not pending_price).
 - [ ] `GET /billing/summary` ≡ Σ stamped costs (invariant 3).
 - [ ] Force a backup: `run-task` on `usage-namastex-backup` → object lands
-      in `s3://usage-backups-<account>/namastex/`.
+      in `s3://usage-backups-<account>/backups/namastex/`.
 - [ ] Subscribe ops email to alerts:
       `aws sns subscribe --topic-arn <alerts_topic_arn> --protocol email --notification-endpoint <email>` (+ confirm click).
 - [ ] Scheduler heartbeat in `aws logs tail /usage/namastex/scheduler`.

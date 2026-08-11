@@ -13,7 +13,10 @@ set -euo pipefail
 : "${MONGO_USAGE_DB_NAME:?}" "${BACKUP_BUCKET:?}" "${BACKUP_PREFIX:?}"
 
 STAMP=$(date -u +%Y-%m-%dT%H%MZ)
-FINAL="s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/${STAMP}.archive.gz"
+# backups/ prefix ON PURPOSE (audit round 2): the bucket's lifecycle rule
+# is scoped to backups/* so it can never Glacier/expire the config/
+# objects the LangWatch EC2 boots from.
+FINAL="s3://${BACKUP_BUCKET}/backups/${BACKUP_PREFIX}/${STAMP}.archive.gz"
 TMP="${FINAL}.tmp"
 
 echo "backup: dumping ${MONGO_USAGE_DB_NAME} -> ${TMP}"
@@ -27,8 +30,12 @@ mongodump \
   --db "${MONGO_USAGE_DB_NAME}" \
   --archive --gzip \
   | aws s3 cp - "${TMP}" --expected-size 4294967296
-DUMP_STATUS=${PIPESTATUS[0]}
-UPLOAD_STATUS=${PIPESTATUS[1]}
+# ONE line, atomically (audit round 2): the first assignment is itself a
+# command and would reset PIPESTATUS — reading [1] afterwards was an
+# unbound-variable abort (exit 127) on EVERY run, after the upload.
+STATUSES=("${PIPESTATUS[@]}")
+DUMP_STATUS=${STATUSES[0]}
+UPLOAD_STATUS=${STATUSES[1]}
 set -e
 
 if [ "${DUMP_STATUS}" != "0" ] || [ "${UPLOAD_STATUS}" != "0" ]; then

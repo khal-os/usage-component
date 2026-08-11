@@ -186,6 +186,12 @@ resource "aws_instance" "langwatch" {
     # Replacing this instance wipes LangWatch's ~49-day window; the Mongo
     # store is the permanent archive, but make the operator SAY so.
     prevent_destroy = true
+    # Audit round 2: most_recent AMI re-resolves every plan; a new AL2023
+    # release would otherwise plan a replacement that prevent_destroy
+    # turns into a hard error — blocking EVERY apply within weeks.
+    # Patching the box's base image is a deliberate act (targeted
+    # -replace after lifting prevent_destroy), not a side effect.
+    ignore_changes = [ami]
   }
 }
 

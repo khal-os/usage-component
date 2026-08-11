@@ -114,7 +114,7 @@ Publishers: backup-failure rules + queue alarms (tenant-tagged).
 
 ## Backups & restore
 
-- `s3://usage-backups-<account>/<client>/<timestamp>.archive.gz`, 35 days
+- `s3://usage-backups-<account>/backups/<client>/<timestamp>.archive.gz`, 35 days
   hot → Glacier, expire ~13 months; bucket versioned.
 - Restore drill: `mongorestore --uri ... --archive --gzip < file` into a
   scratch db, then `GET /billing/summary` on it must equal the live month

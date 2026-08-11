@@ -24,23 +24,34 @@ CAPACITY_JSON=$(aws ssm get-parameter \
   --name "$CAPACITY_PARAM" --region "$REGION" \
   --query Parameter.Value --output text)
 
-# jq -er: a MISSING key aborts the boot (jq -r would emit the literal
-# string "null" — and a "null" CREDENTIALS_SECRET is unrecoverable after
-# first boot).
+# Each key resolves as a STANDALONE command (audit round 2): a command
+# substitution inside a heredoc never trips set -e, and `jq -e` still
+# PRINTS "null" for a missing key — the old shape wrote the literal
+# string "null" as CREDENTIALS_SECRET, which is unrecoverable after
+# first boot. As standalone assignments, jq -e's non-zero DOES abort.
 jq_secret() { echo "$SECRET_JSON" | jq -er ".$1"; }
 jq_cap() { echo "$CAPACITY_JSON" | jq -er ".$1"; }
+
+V_NEXTAUTH=$(jq_secret LW_NEXTAUTH_SECRET)
+V_JWT=$(jq_secret LW_API_TOKEN_JWT_SECRET)
+V_CREDENTIALS=$(jq_secret LW_CREDENTIALS_SECRET)
+V_REPLICAS=$(jq_cap LANGWATCH_WORKERS_REPLICAS)
+V_LW_MEM=$(jq_cap LANGWATCH_MEMORY_LIMIT)
+V_REDIS_MEM=$(jq_cap LW_REDIS_MEMORY_LIMIT)
+V_CH_MEM=$(jq_cap LW_CLICKHOUSE_MEMORY_LIMIT)
+V_CH_CPU=$(jq_cap LW_CLICKHOUSE_CPU_LIMIT)
 
 cat > .env <<ENV_EOF
 CLIENT_NAME=$CLIENT_NAME
 LANGWATCH_PUBLIC_URL=$LANGWATCH_PUBLIC_URL
-LW_NEXTAUTH_SECRET=$(jq_secret LW_NEXTAUTH_SECRET)
-LW_API_TOKEN_JWT_SECRET=$(jq_secret LW_API_TOKEN_JWT_SECRET)
-LW_CREDENTIALS_SECRET=$(jq_secret LW_CREDENTIALS_SECRET)
-LANGWATCH_WORKERS_REPLICAS=$(jq_cap LANGWATCH_WORKERS_REPLICAS)
-LANGWATCH_MEMORY_LIMIT=$(jq_cap LANGWATCH_MEMORY_LIMIT)
-LW_REDIS_MEMORY_LIMIT=$(jq_cap LW_REDIS_MEMORY_LIMIT)
-LW_CLICKHOUSE_MEMORY_LIMIT=$(jq_cap LW_CLICKHOUSE_MEMORY_LIMIT)
-LW_CLICKHOUSE_CPU_LIMIT=$(jq_cap LW_CLICKHOUSE_CPU_LIMIT)
+LW_NEXTAUTH_SECRET=$V_NEXTAUTH
+LW_API_TOKEN_JWT_SECRET=$V_JWT
+LW_CREDENTIALS_SECRET=$V_CREDENTIALS
+LANGWATCH_WORKERS_REPLICAS=$V_REPLICAS
+LANGWATCH_MEMORY_LIMIT=$V_LW_MEM
+LW_REDIS_MEMORY_LIMIT=$V_REDIS_MEM
+LW_CLICKHOUSE_MEMORY_LIMIT=$V_CH_MEM
+LW_CLICKHOUSE_CPU_LIMIT=$V_CH_CPU
 ENV_EOF
 chmod 600 .env
 
