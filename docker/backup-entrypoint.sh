@@ -3,24 +3,46 @@
 #   MONGO_DB_HOST / MONGO_DB_USER / MONGO_DB_PASSWORD  (tenant secret)
 #   MONGO_USAGE_DB_NAME                                 (decision 139)
 #   BACKUP_BUCKET / BACKUP_PREFIX
-# pipefail is the whole point: a failed dump must fail the task, never
-# upload a truncated archive as if it were a backup.
+# Review-hardened flow: upload to a .tmp key, verify the dump pipeline's
+# OWN exit status (PIPESTATUS — `aws s3 cp -` happily completes a
+# truncated multipart upload on EOF), rename into place only on success,
+# then publish the Succeeded metric the 25h backstop alarm watches.
 set -euo pipefail
 
 : "${MONGO_DB_HOST:?}" "${MONGO_DB_USER:?}" "${MONGO_DB_PASSWORD:?}"
 : "${MONGO_USAGE_DB_NAME:?}" "${BACKUP_BUCKET:?}" "${BACKUP_PREFIX:?}"
 
 STAMP=$(date -u +%Y-%m-%dT%H%MZ)
-DEST="s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/${STAMP}.archive.gz"
+FINAL="s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/${STAMP}.archive.gz"
+TMP="${FINAL}.tmp"
 
-echo "backup: dumping ${MONGO_USAGE_DB_NAME} -> ${DEST}"
+echo "backup: dumping ${MONGO_USAGE_DB_NAME} -> ${TMP}"
 
+set +e
 mongodump \
   --uri "mongodb+srv://${MONGO_DB_HOST}/" \
   --username "${MONGO_DB_USER}" \
   --password "${MONGO_DB_PASSWORD}" \
+  --authenticationDatabase admin \
   --db "${MONGO_USAGE_DB_NAME}" \
   --archive --gzip \
-  | aws s3 cp - "${DEST}" --expected-size 1073741824
+  | aws s3 cp - "${TMP}" --expected-size 4294967296
+DUMP_STATUS=${PIPESTATUS[0]}
+UPLOAD_STATUS=${PIPESTATUS[1]}
+set -e
 
-echo "backup: done ${DEST}"
+if [ "${DUMP_STATUS}" != "0" ] || [ "${UPLOAD_STATUS}" != "0" ]; then
+  echo "backup FAILED (mongodump=${DUMP_STATUS} upload=${UPLOAD_STATUS}) — removing partial object" >&2
+  aws s3 rm "${TMP}" || true
+  exit 1
+fi
+
+aws s3 mv "${TMP}" "${FINAL}"
+
+aws cloudwatch put-metric-data \
+  --namespace Usage/Backup \
+  --metric-name Succeeded \
+  --dimensions Tenant="${BACKUP_PREFIX}" \
+  --value 1
+
+echo "backup: done ${FINAL}"

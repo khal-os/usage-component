@@ -15,14 +15,27 @@ variable "client_name" {
   type        = string
 
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{1,30}$", var.client_name))
-    error_message = "client_name must be a lowercase slug (hostnames and resource names derive from it)."
+    # ≤ 22 chars so "usage-<name>-api" fits AWS's 32-char ALB/TG name
+    # limit WITHOUT truncation (review fix: substr could cut to a
+    # trailing '-' or collide two tenants' names).
+    condition     = can(regex("^[a-z][a-z0-9-]{1,21}$", var.client_name))
+    error_message = "client_name must be a lowercase slug of at most 22 chars (usage-<name>-api must fit AWS's 32-char name limits)."
   }
 }
 
 variable "client_timezone" {
   description = "Decision 130: the client's billing boundary = display zone (IANA)."
   type        = string
+}
+
+variable "vpc_cidr" {
+  description = <<-EOT
+    This tenant's own VPC (decision 142). The same CIDR across tenants is
+    deliberate — tenant VPCs are NEVER peered; if that ever changes,
+    re-IP first.
+  EOT
+  type        = string
+  default     = "10.80.0.0/16"
 }
 
 variable "image_sha" {

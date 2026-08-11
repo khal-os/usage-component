@@ -53,6 +53,23 @@ describe('makeTraceSourceClient (decision 127 — declared, never inferred)', ()
     expect(logger.messages('info').join('\n')).toContain('ClickHouse');
   });
 
+  it('MUST refuse ClickHouse with a URL but NO project id — a URL alone would drop the tenant filter and ingest EVERY project (audit G-1)', async () => {
+    const { makeTraceSourceClient } = await loadFactory({
+      langwatchClickhouseUrl: 'http://clickhouse:8123',
+    });
+
+    expect(() => makeTraceSourceClient()).toThrow(/No trace source configured/);
+  });
+
+  it('MUST treat a whitespace project id as unset — the ECS pre-onboarding SSM placeholder is " ", and filtering by it would be a healthy-looking zero-ingest', async () => {
+    const { makeTraceSourceClient } = await loadFactory({
+      langwatchClickhouseUrl: 'http://clickhouse:8123',
+      langwatchProjectId: ' ',
+    });
+
+    expect(() => makeTraceSourceClient()).toThrow(/No trace source configured/);
+  });
+
   it('MUST select the fixture fake ONLY behind the explicit TRACE_SOURCE=fixtures opt-in — loudly', async () => {
     const { makeTraceSourceClient } = await loadFactory({
       traceSource: 'fixtures',

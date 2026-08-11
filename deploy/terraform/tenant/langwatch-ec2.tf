@@ -15,23 +15,7 @@ data "aws_ami" "al2023" {
 
 resource "aws_security_group" "langwatch" {
   name_prefix = "${local.name}-langwatch-"
-  vpc_id      = local.fdn.vpc_id
-
-  ingress {
-    description     = "LangWatch app (UI + OTLP ingest) from the ALB"
-    from_port       = 5560
-    to_port         = 5560
-    protocol        = "tcp"
-    security_groups = [local.fdn.alb_security_group_id]
-  }
-
-  ingress {
-    description     = "ClickHouse reads from the connector (decision 127)"
-    from_port       = 8123
-    to_port         = 8123
-    protocol        = "tcp"
-    security_groups = [aws_security_group.workers.id]
-  }
+  vpc_id      = aws_vpc.main.id
 
   egress {
     from_port   = 0
@@ -43,6 +27,26 @@ resource "aws_security_group" "langwatch" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# Cross-SG references as standalone rules (review fix: inline rules
+# referencing another SG deadlock its create_before_destroy replacement).
+resource "aws_vpc_security_group_ingress_rule" "langwatch_from_alb" {
+  description                  = "LangWatch app (UI + OTLP ingest) from the ALB"
+  security_group_id            = aws_security_group.langwatch.id
+  referenced_security_group_id = aws_security_group.alb.id
+  from_port                    = 5560
+  to_port                      = 5560
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "langwatch_from_workers" {
+  description                  = "ClickHouse reads from the connector (decision 127)"
+  security_group_id            = aws_security_group.langwatch.id
+  referenced_security_group_id = aws_security_group.workers.id
+  from_port                    = 8123
+  to_port                      = 8123
+  ip_protocol                  = "tcp"
 }
 
 # Instance profile: read the tenant secret at boot, push the queue metric,
@@ -75,6 +79,16 @@ data "aws_iam_policy_document" "langwatch_boot" {
   }
 
   statement {
+    actions   = ["ssm:GetParameter"]
+    resources = [aws_ssm_parameter.langwatch_capacity.arn]
+  }
+
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${local.fdn.backups_bucket_arn}/config/${var.client_name}/*"]
+  }
+
+  statement {
     actions   = ["cloudwatch:PutMetricData"]
     resources = ["*"]
 
@@ -84,6 +98,39 @@ data "aws_iam_policy_document" "langwatch_boot" {
       values   = ["Usage/LangWatch"]
     }
   }
+}
+
+# Capacity knobs live in SSM, not in user_data (review fix): a retune is
+# `terraform apply` + service restart — never an instance replacement
+# fighting prevent_destroy.
+resource "aws_ssm_parameter" "langwatch_capacity" {
+  name = "/usage/${var.client_name}/langwatch-capacity"
+  type = "String"
+
+  value = jsonencode({
+    LANGWATCH_WORKERS_REPLICAS = var.langwatch_workers_replicas
+    LANGWATCH_MEMORY_LIMIT     = var.langwatch_memory_limit
+    LW_REDIS_MEMORY_LIMIT      = var.lw_redis_memory_limit
+    LW_CLICKHOUSE_MEMORY_LIMIT = var.lw_clickhouse_memory_limit
+    LW_CLICKHOUSE_CPU_LIMIT    = var.lw_clickhouse_cpu_limit
+  })
+}
+
+# Compose file + bootstrap script are served from S3 (config prefix of the
+# shared bucket) and re-fetched on EVERY service start — bugfixes deploy
+# with terraform apply + restart, never instance replacement.
+resource "aws_s3_object" "langwatch_compose" {
+  bucket  = local.fdn.backups_bucket_name
+  key     = "config/${var.client_name}/langwatch-compose.yml"
+  content = file("${path.module}/templates/langwatch-compose.yml")
+  etag    = filemd5("${path.module}/templates/langwatch-compose.yml")
+}
+
+resource "aws_s3_object" "langwatch_bootstrap" {
+  bucket  = local.fdn.backups_bucket_name
+  key     = "config/${var.client_name}/langwatch-bootstrap.sh"
+  content = file("${path.module}/templates/langwatch-bootstrap.sh")
+  etag    = filemd5("${path.module}/templates/langwatch-bootstrap.sh")
 }
 
 resource "aws_iam_role_policy" "langwatch_boot" {
@@ -100,7 +147,7 @@ resource "aws_iam_instance_profile" "langwatch" {
 resource "aws_instance" "langwatch" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.langwatch_instance_type
-  subnet_id              = local.fdn.private_subnet_ids[0]
+  subnet_id              = aws_subnet.private[0].id
   vpc_security_group_ids = [aws_security_group.langwatch.id]
   iam_instance_profile   = aws_iam_instance_profile.langwatch.name
 
@@ -114,21 +161,26 @@ resource "aws_instance" "langwatch" {
     }
   }
 
+  # STABLE values only (capacity/compose/bootstrap arrive via SSM/S3 at
+  # every service start) — user_data changes are structural and rare.
   user_data = templatefile("${path.module}/templates/langwatch-user-data.sh.tftpl", {
-    client_name                = var.client_name
-    secret_arn                 = aws_secretsmanager_secret.tenant.arn
-    region                     = var.region
-    langwatch_public_url       = "https://${local.langwatch_hostname}"
-    langwatch_workers_replicas = var.langwatch_workers_replicas
-    langwatch_memory_limit     = var.langwatch_memory_limit
-    lw_redis_memory_limit      = var.lw_redis_memory_limit
-    lw_clickhouse_memory_limit = var.lw_clickhouse_memory_limit
-    lw_clickhouse_cpu_limit    = var.lw_clickhouse_cpu_limit
-    compose_file               = file("${path.module}/templates/langwatch-compose.yml")
+    client_name          = var.client_name
+    secret_arn           = aws_secretsmanager_secret.tenant.arn
+    region               = var.region
+    langwatch_public_url = "https://${local.langwatch_hostname}"
+    capacity_param       = aws_ssm_parameter.langwatch_capacity.name
+    compose_s3_uri       = "s3://${local.fdn.backups_bucket_name}/${aws_s3_object.langwatch_compose.key}"
+    bootstrap_s3_uri     = "s3://${local.fdn.backups_bucket_name}/${aws_s3_object.langwatch_bootstrap.key}"
   })
-  user_data_replace_on_change = true
+  user_data_replace_on_change = false
 
   tags = { Name = "${local.name}-langwatch" }
+
+  # Review fix: user-data's first boot needs EGRESS (dnf, github, S3, SM)
+  # — the NAT and private route must exist before the instance boots, or
+  # the once-only install dies with no route. (The per-boot service
+  # retries, but docker/compose install is once-only.)
+  depends_on = [aws_route_table_association.private, aws_nat_gateway.main]
 
   lifecycle {
     # Replacing this instance wipes LangWatch's ~49-day window; the Mongo
@@ -137,13 +189,35 @@ resource "aws_instance" "langwatch" {
   }
 }
 
+# ── Stable in-VPC name for ClickHouse (review fix) ───────────────────────────
+# The connector's env points here, not at a hardcoded private IP: if the
+# instance is ever replaced, terraform updates this record and the RUNNING
+# connector keeps working — no task-definition churn, no stale-IP window
+# (services ignore task_definition by design).
+
+resource "aws_route53_zone" "internal" {
+  name = "internal.usage"
+
+  vpc {
+    vpc_id = aws_vpc.main.id
+  }
+}
+
+resource "aws_route53_record" "clickhouse" {
+  zone_id = aws_route53_zone.internal.zone_id
+  name    = "clickhouse.internal.usage"
+  type    = "A"
+  ttl     = 60
+  records = [aws_instance.langwatch.private_ip]
+}
+
 # ── Edge: hostname → app port ────────────────────────────────────────────────
 
 resource "aws_lb_target_group" "langwatch" {
   name        = substr("${local.name}-lw", 0, 32)
   port        = 5560
   protocol    = "HTTP"
-  vpc_id      = local.fdn.vpc_id
+  vpc_id      = aws_vpc.main.id
   target_type = "instance"
 
   health_check {
@@ -159,8 +233,8 @@ resource "aws_lb_target_group_attachment" "langwatch" {
 }
 
 resource "aws_lb_listener_rule" "langwatch" {
-  listener_arn = local.fdn.https_listener_arn
-  priority     = local.rule_priority_base + 1
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 101
 
   action {
     type             = "forward"
@@ -180,8 +254,8 @@ resource "aws_route53_record" "langwatch" {
   type    = "A"
 
   alias {
-    name                   = local.fdn.alb_dns_name
-    zone_id                = local.fdn.alb_zone_id
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
     evaluate_target_health = true
   }
 }

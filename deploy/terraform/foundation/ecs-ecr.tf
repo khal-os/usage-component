@@ -36,11 +36,16 @@ resource "aws_ecr_lifecycle_policy" "images" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "keep the last 50 images (every kept SHA stays deployable)"
+      # 200 not 50 (review fix): repos are FLEET-shared — a tenant pinned
+      # to an old SHA must not lose its image to other tenants' deploy
+      # cadence (expiry strikes on the next task restart, uncorrelated
+      # with any operator action). ~$6/repo/mo at typical image sizes;
+      # the deploy script separately refuses SHAs absent from ECR.
+      description = "keep the last 200 images (every kept SHA stays deployable)"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 50
+        countNumber = 200
       }
       action = { type = "expire" }
     }]

@@ -9,18 +9,21 @@ tenant, nothing defaults).
 
 ## Layout
 
-- Foundation (once): `deploy/terraform/foundation` — VPC/NAT, ECS cluster
-  `usage-main`, ECR, ALB + wildcard cert, Route53 zone, CI role, backups
-  bucket, `usage-alerts` SNS topic.
-- Tenant (per client): `deploy/terraform/tenant` — api/connector/scheduler
-  Fargate services, nightly backup task, LangWatch EC2, secret shell,
-  hostnames `<client>-api.<domain>` / `<client>-langwatch.<domain>`.
+- Foundation (once): `deploy/terraform/foundation` — ECS cluster
+  `usage-main`, ECR, wildcard cert, Route53 zone, CI role, backups bucket,
+  `usage-alerts` SNS topic. NO network (decision 142).
+- Tenant (per client): `deploy/terraform/tenant` — its OWN VPC/NAT/ALB
+  (complete isolation, per-client egress IP for the Atlas allowlist —
+  decision 142), api/connector/scheduler Fargate services, nightly backup
+  task, LangWatch EC2, secret shell, hostnames `<client>-api.<domain>` /
+  `<client>-langwatch.<domain>`.
 
 ## Onboard a tenant
 
 1. **Atlas (manual, once per client):** create project + cluster (Flex to
    start; M10+PrivateLink is the posture upgrade), a db user, and allowlist
-   the NAT egress IP (foundation output `nat_egress_ip`).
+   THIS tenant's NAT egress IP (tenant output `nat_egress_ip` — per-client,
+   decision 142; available only after the tenant apply, so allowlist then).
 2. **Terraform:**
    ```bash
    cd deploy/terraform/tenant
@@ -40,8 +43,9 @@ tenant, nothing defaults).
      "BASIC_AUTH_PASSWORD": "<openssl rand -base64 24 — decision 141; drop the pair (and set enable_basic_auth=false) only when the KHAL quartet takes over>"
    }'
    ```
-   Then reboot the LangWatch EC2 once (user-data re-reads the secret) and
-   force new deployments of the services.
+   The EC2 needs NOTHING: `langwatch-bootstrap.service` retries every 30s
+   until the secret exists, then brings the stack up itself. Just force new
+   deployments of the ECS services (or let the first deploy roll them).
 4. **First deploy:** `make aws-deploy CLIENT=<client> SHA=<git sha>` (or the
    deploy-tenant workflow button).
 5. **Prices BEFORE traffic** (pending_price self-heals, but don't rely on
@@ -86,13 +90,16 @@ and no overrides.
 ## LangWatch EC2 operations
 
 - Shell: `aws ssm start-session --target <instance-id>` (no SSH, no keys).
-- Stack lives in `/opt/langwatch` (compose.yml + generated .env). The .env
-  is DISPOSABLE — regenerated from Secrets Manager on every boot; never
-  hand-edit it as a source of truth.
-- Capacity retune during load-testing: edit tfvars AND (for immediate
-  effect) the instance's .env + `docker compose up -d`; align tfvars in the
-  same PR. Changing user-data vars replaces the instance (prevent_destroy
-  makes Terraform demand an explicit decision first).
+- Stack lives in `/opt/langwatch` (compose.yml + generated .env), driven by
+  `langwatch-bootstrap.service`: on EVERY service start it re-fetches the
+  compose file + bootstrap from S3, the LW secrets from Secrets Manager and
+  the capacity knobs from SSM, regenerates .env, and `compose up`s. The
+  .env is DISPOSABLE output — never hand-edit it as a source of truth.
+- Capacity retune (incl. load-testing): edit tfvars → `terraform apply`
+  (updates the SSM capacity parameter — NO instance replacement) → restart:
+  `aws ssm send-command --document-name AWS-RunShellScript \
+     --instance-ids <id> --parameters commands='systemctl restart langwatch-bootstrap'`
+  (or reboot the instance). Secret rotation propagates the same way.
 - Queue metric/alarm: `Usage/LangWatch RedisUsedMemoryPercent{Tenant}` —
   alarm at 80% for 5 min; missing data BREACHES (a dead metric was the
   original failure mode).

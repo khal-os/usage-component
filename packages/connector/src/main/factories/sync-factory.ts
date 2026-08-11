@@ -32,20 +32,31 @@ const quietPeriodMs = (): number =>
   (config.traceIngestionQuietPeriodSeconds ??
     INGESTION_DEFAULTS.quietPeriodSeconds) * 1000;
 
-const makeClickHouseClient = (): ClickHouseLangWatchClient | undefined =>
-  config.langwatchClickhouseUrl
+// BOTH the URL and a non-blank project id are required (audit G-1): in
+// ECS the URL is always set and the project id arrives via SSM with a
+// whitespace placeholder until onboarding — URL-without-project must land
+// in the crash path below, because the alternatives are silent: a blank
+// filter matches nothing (healthy-looking zero-ingest) and an absent
+// tenantId drops the filter entirely (EVERY project ingested into a
+// single-tenant archive). The schema already trims; the trim here guards
+// direct config construction too.
+const makeClickHouseClient = (): ClickHouseLangWatchClient | undefined => {
+  const projectId = config.langwatchProjectId?.trim();
+
+  return config.langwatchClickhouseUrl && projectId
     ? new ClickHouseLangWatchClient({
         url: config.langwatchClickhouseUrl,
         username: config.langwatchClickhouseUser ?? 'default',
         password: config.langwatchClickhousePassword ?? '',
         database: config.langwatchClickhouseDatabase ?? 'langwatch',
-        tenantId: config.langwatchProjectId,
+        tenantId: projectId,
         quietPeriodMs: quietPeriodMs(),
         // audit C-6.2: skipped rows leave a durable record, not just a log.
         poisonRowRepository: new MongoDbPoisonRowRepository(),
         logger: syncLogger,
       })
     : undefined;
+};
 
 /**
  * Decision 127: the source is DECLARED, never inferred. ClickHouse is the

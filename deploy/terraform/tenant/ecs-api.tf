@@ -38,16 +38,12 @@ locals {
 # ── Security groups ──────────────────────────────────────────────────────────
 
 # The api receives from the ALB only; workers receive nothing.
+# Cross-SG references live in standalone rule resources (review fix:
+# an inline rule referencing another SG deadlocks that SG's
+# create_before_destroy replacement with a DependencyViolation).
 resource "aws_security_group" "api" {
   name_prefix = "${local.name}-api-"
-  vpc_id      = local.fdn.vpc_id
-
-  ingress {
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [local.fdn.alb_security_group_id]
-  }
+  vpc_id      = aws_vpc.main.id
 
   egress {
     from_port   = 0
@@ -61,10 +57,18 @@ resource "aws_security_group" "api" {
   }
 }
 
+resource "aws_vpc_security_group_ingress_rule" "api_from_alb" {
+  security_group_id            = aws_security_group.api.id
+  referenced_security_group_id = aws_security_group.alb.id
+  from_port                    = 3000
+  to_port                      = 3000
+  ip_protocol                  = "tcp"
+}
+
 resource "aws_security_group" "workers" {
   name_prefix = "${local.name}-workers-"
   description = "connector/scheduler/backup — egress only"
-  vpc_id      = local.fdn.vpc_id
+  vpc_id      = aws_vpc.main.id
 
   egress {
     from_port   = 0
@@ -112,7 +116,7 @@ resource "aws_lb_target_group" "api" {
   name        = substr("${local.name}-api", 0, 32)
   port        = 3000
   protocol    = "HTTP"
-  vpc_id      = local.fdn.vpc_id
+  vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
   health_check {
@@ -125,16 +129,10 @@ resource "aws_lb_target_group" "api" {
   deregistration_delay = 30
 }
 
-# Listener-rule priorities must be unique ACROSS tenants sharing the one
-# listener — derived deterministically from the slug (collision would fail
-# loudly at apply, not route silently wrong).
-locals {
-  rule_priority_base = 100 + 2 * (parseint(substr(sha1(var.client_name), 0, 4), 16) % 24000)
-}
-
+# Decision 142: the listener is THIS tenant's own — priorities are plain.
 resource "aws_lb_listener_rule" "api" {
-  listener_arn = local.fdn.https_listener_arn
-  priority     = local.rule_priority_base
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 100
 
   action {
     type             = "forward"
@@ -154,8 +152,8 @@ resource "aws_route53_record" "api" {
   type    = "A"
 
   alias {
-    name                   = local.fdn.alb_dns_name
-    zone_id                = local.fdn.alb_zone_id
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
     evaluate_target_health = true
   }
 }
@@ -178,7 +176,7 @@ resource "aws_ecs_service" "api" {
   }
 
   network_configuration {
-    subnets         = local.fdn.private_subnet_ids
+    subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.api.id]
   }
 

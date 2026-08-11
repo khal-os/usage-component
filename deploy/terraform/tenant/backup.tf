@@ -42,13 +42,25 @@ resource "aws_iam_role" "backup_schedule" {
 
 data "aws_iam_policy_document" "backup_run_task" {
   statement {
-    actions   = ["ecs:RunTask"]
-    resources = ["${aws_ecs_task_definition.backup.arn_without_revision}:*"]
+    actions = ["ecs:RunTask"]
+    # BOTH ARN forms (review fix): the schedule passes the REVISION-LESS
+    # ARN, and IAM matches the ARN as called — family:* alone would
+    # AccessDeny every single 07:00 fire, silently.
+    resources = [
+      aws_ecs_task_definition.backup.arn_without_revision,
+      "${aws_ecs_task_definition.backup.arn_without_revision}:*",
+    ]
   }
 
   statement {
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.execution.arn, aws_iam_role.backup_task.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
   }
 }
 
@@ -78,14 +90,38 @@ resource "aws_scheduler_schedule" "backup" {
       launch_type         = "FARGATE"
 
       network_configuration {
-        subnets         = local.fdn.private_subnet_ids
+        subnets         = aws_subnet.private[*].id
         security_groups = [aws_security_group.workers.id]
       }
     }
   }
 }
 
-# Failure → alert: any STOPPED backup task with a non-zero exit code.
+# THE backstop (review fix): a daily Succeeded=1 metric published by the
+# entrypoint after a verified upload; a day with NO datapoint alarms.
+# This covers every silent mode at once — RunTask denied (no ECS event),
+# image-pull failure (no exitCode on the event), truncated dump (task
+# exits 1 before publishing), schedule misfire.
+resource "aws_cloudwatch_metric_alarm" "backup_missing" {
+  alarm_name          = "${local.name}-backup-missing"
+  alarm_description   = "No successful backup in >1 day — on Flex/M0 this is the ONLY backup of the permanent archive."
+  namespace           = "Usage/Backup"
+  metric_name         = "Succeeded"
+  dimensions          = { Tenant = var.client_name }
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+
+  alarm_actions = [local.fdn.alerts_topic_arn]
+  ok_actions    = [local.fdn.alerts_topic_arn]
+}
+
+# Failure → immediate alert: any STOPPED backup task with a non-zero exit
+# code (fast signal; the metric alarm above is the completeness backstop —
+# events without an exitCode don't match this pattern).
 resource "aws_cloudwatch_event_rule" "backup_failed" {
   name = "${local.name}-backup-failed"
 

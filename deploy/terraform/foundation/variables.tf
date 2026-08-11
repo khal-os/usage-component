@@ -13,17 +13,17 @@ variable "base_domain" {
   type        = string
 }
 
-variable "vpc_cidr" {
-  description = "CIDR of the shared VPC."
-  type        = string
-  default     = "10.80.0.0/16"
-}
-
 variable "github_oidc_subjects" {
   description = <<-EOT
-    GitHub OIDC subject claims allowed to assume the CI role. Default:
-    pushes to main of this repo only.
+    GitHub OIDC subject claims allowed to assume the CI role — pushes to
+    main of this repo only. TWO spellings because this repo's sub uses
+    GitHub's ID-stamped prefix (repo:org@id/name@id:..., verified via
+    GET /actions/oidc/customization/sub 2026-08-10) — the classic form is
+    kept so a future GitHub flip back doesn't lock CI out.
   EOT
   type        = list(string)
-  default     = ["repo:khal-os/usage-component:ref:refs/heads/main"]
+  default = [
+    "repo:khal-os/usage-component:ref:refs/heads/main",
+    "repo:khal-os@273177925/usage-component@1315313963:ref:refs/heads/main",
+  ]
 }

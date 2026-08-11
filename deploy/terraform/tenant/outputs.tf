@@ -7,8 +7,13 @@ output "langwatch_url" {
   value       = "https://${local.langwatch_hostname}"
 }
 
+output "nat_egress_ip" {
+  description = "THIS client's egress IP — what THEIR Atlas allowlist admits (decision 142)."
+  value       = aws_eip.nat.public_ip
+}
+
 output "clickhouse_private_url" {
-  value = "http://${aws_instance.langwatch.private_ip}:8123"
+  value = "http://${aws_route53_record.clickhouse.name}:8123"
 }
 
 output "tenant_secret_arn" {

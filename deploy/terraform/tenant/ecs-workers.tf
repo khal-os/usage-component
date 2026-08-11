@@ -23,13 +23,17 @@ resource "aws_ecs_task_definition" "connector" {
       { name = "TRACE_INGESTION_INTERVAL_SECONDS", value = tostring(var.trace_ingestion_interval_seconds) },
       { name = "TRACE_INGESTION_BATCH_SIZE", value = tostring(var.trace_ingestion_batch_size) },
       { name = "TRACE_INGESTION_QUIET_PERIOD_SECONDS", value = tostring(var.trace_ingestion_quiet_period_seconds) },
-      { name = "LANGWATCH_CLICKHOUSE_URL", value = "http://${aws_instance.langwatch.private_ip}:8123" },
+      # Stable private DNS name (review fix) — survives instance
+      # replacement without task-def churn.
+      { name = "LANGWATCH_CLICKHOUSE_URL", value = "http://${aws_route53_record.clickhouse.name}:8123" },
       { name = "LANGWATCH_CLICKHOUSE_USER", value = "default" },
       { name = "LANGWATCH_CLICKHOUSE_PASSWORD", value = "langwatch" },
       { name = "LANGWATCH_CLICKHOUSE_DATABASE", value = "langwatch" },
     ])
-    # Empty until onboarding (audit G-1): the worker exits 1 in a VISIBLE
-    # restart loop, never an idle that reads healthy.
+    # Whitespace placeholder until onboarding: the connector TRIMS it to
+    # unset and — with no project id — refuses the ClickHouse source and
+    # exits 1 in a VISIBLE restart loop (audit G-1; the trim + factory
+    # gate are the app-side halves of this contract).
     secrets = concat(local.mongo_secrets, [
       { name = "LANGWATCH_PROJECT_ID", valueFrom = aws_ssm_parameter.langwatch_project_id.arn },
     ])
@@ -49,7 +53,7 @@ resource "aws_ecs_service" "connector" {
   deployment_maximum_percent         = 100
 
   network_configuration {
-    subnets         = local.fdn.private_subnet_ids
+    subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.workers.id]
   }
 
@@ -102,7 +106,7 @@ resource "aws_ecs_service" "scheduler" {
   deployment_maximum_percent         = 100
 
   network_configuration {
-    subnets         = local.fdn.private_subnet_ids
+    subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.workers.id]
   }
 
