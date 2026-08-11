@@ -22,7 +22,7 @@ CLUSTER="usage-main"
 say() { echo "==> $*"; }
 
 say "verifying ${SHA} exists in ECR (all three repos)"
-for repo in platform-module platform-connector platform-mongo-backup; do
+for repo in platform-module platform-connector usage-db-backup; do
   aws ecr describe-images --repository-name "$repo" \
     --image-ids imageTag="$SHA" >/dev/null 2>&1 \
     || { echo "image ${repo}:${SHA} NOT in ECR — did build-images finish on main?" >&2; exit 1; }

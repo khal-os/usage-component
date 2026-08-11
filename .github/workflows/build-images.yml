@@ -22,7 +22,13 @@ jobs:
       # ECR-existence guard is what decides deployability of a SHA).
       fail-fast: false
       matrix:
-        image: [module, connector, mongo-backup]
+        # image = ECR repo/tag; dockerfile = docker/<name>.Dockerfile.
+        # usage-db-backup carries no platform- prefix on purpose: it is
+        # the backup of the tenant's usage DB, not of the platform.
+        include:
+          - { image: platform-module, dockerfile: module }
+          - { image: platform-connector, dockerfile: connector }
+          - { image: usage-db-backup, dockerfile: usage-db-backup }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -36,18 +42,18 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
-      - name: Build and push platform-${{ matrix.image }}:${{ github.sha }}
+      - name: Build and push ${{ matrix.image }}:${{ github.sha }}
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
-          IMAGE="$REGISTRY/platform-${{ matrix.image }}:${{ github.sha }}"
+          IMAGE="$REGISTRY/${{ matrix.image }}:${{ github.sha }}"
           # Immutable tags: if this SHA is already pushed (workflow rerun),
           # rebuilding it would be refused — skip instead.
           if aws ecr describe-images \
-              --repository-name "platform-${{ matrix.image }}" \
+              --repository-name "${{ matrix.image }}" \
               --image-ids imageTag="${{ github.sha }}" >/dev/null 2>&1; then
             echo "SHA already in ECR — nothing to do (immutable tags)"
             exit 0
           fi
-          docker build -f docker/${{ matrix.image }}.Dockerfile -t "$IMAGE" .
+          docker build -f docker/${{ matrix.dockerfile }}.Dockerfile -t "$IMAGE" .
           docker push "$IMAGE"

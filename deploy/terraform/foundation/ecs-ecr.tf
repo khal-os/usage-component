@@ -18,7 +18,7 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 # IMMUTABLE tags: a SHA can never be overwritten — rollback is repointing
 # a service to yesterday's tag (decision 140; kills the clobber class).
 resource "aws_ecr_repository" "images" {
-  for_each = toset(["platform-module", "platform-connector", "platform-mongo-backup"])
+  for_each = toset(["platform-module", "platform-connector", "usage-db-backup"])
 
   name                 = each.key
   image_tag_mutability = "IMMUTABLE"
