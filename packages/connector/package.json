@@ -19,7 +19,7 @@
     "test:verbose": "ENVIRONMENT=test jest --passWithNoTests",
     "test:unit": "npm test -- --watch --config=jest-unit.config.mjs",
     "test:integration": "npm test -- --watch --config=jest-integration.config.mjs",
-    "test:ci": "ENVIRONMENT=test jest --passWithNoTests --silent --runInBand --collectCoverage=true",
+    "test:ci": "ENVIRONMENT=test jest --passWithNoTests --silent --runInBand --collectCoverage=true --json --outputFile=jest-results.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:unit:ci": "ENVIRONMENT=test jest --passWithNoTests --silent --noStackTrace --collectCoverage=false --config=jest-unit.config.mjs"
   },

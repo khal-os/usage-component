@@ -103,6 +103,116 @@ jobs:
           path: packages/*/coverage/lcov.info
           retention-days: 7
           if-no-files-found: ignore
+      # Feeds the PR dashboard (decision 146) and the main-metrics record.
+      - name: Upload test metrics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-metrics
+          path: |
+            packages/*/coverage/coverage-summary.json
+            packages/*/coverage/lcov.info
+            packages/*/jest-results.json
+          retention-days: 2
+          if-no-files-found: ignore
+
+  # Sticky PR comment (decision 146): coverage + deltas, trend, diff
+  # coverage, tests, change map, decisions, timing. Never a required
+  # check — the dashboard must never be the reason a PR can't merge.
+  # Skipped for dependabot/fork PRs (their GITHUB_TOKEN is read-only).
+  pr-dashboard:
+    name: PR dashboard
+    needs: test
+    if: always() && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # full history: the dashboard diffs against the PR base sha
+          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ci-metrics
+          path: .ci-metrics
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: test-metrics
+          path: packages
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Collect job timings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" > .ci-jobs.json
+      - name: Build & upsert dashboard comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          JOBS_JSON: .ci-jobs.json
+          METRICS_DIR: .ci-metrics
+        run: |
+          node scripts/pr-dashboard.mjs > .dashboard.md
+          cid=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" --paginate \
+                -q '.[] | select(.body | startswith("<!-- ci-dashboard -->")) | .id' | head -n1)
+          if [ -n "$cid" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${cid}" -F body=@.dashboard.md > /dev/null
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" -F body=@.dashboard.md > /dev/null
+          fi
+
+  # On every main build, append one line to the ci-metrics branch — the
+  # baseline the dashboard's deltas/trend/timing compare against.
+  record-metrics:
+    name: Record main metrics
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ci-metrics
+          path: .ci-metrics
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: test-metrics
+          path: packages
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Collect job timings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" > .ci-jobs.json
+      - name: Append coverage line
+        env:
+          JOBS_JSON: .ci-jobs.json
+        run: |
+          node scripts/record-ci-metrics.mjs coverage > .line.json
+          cd .ci-metrics
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for _ in 1 2 3; do
+            git fetch origin ci-metrics
+            git reset --hard FETCH_HEAD
+            cat ../.line.json >> coverage.ndjson
+            git add coverage.ndjson
+            git commit -m "metrics: coverage @ ${GITHUB_SHA:0:7}" > /dev/null
+            git push origin HEAD:ci-metrics && break
+          done
 
   commitlint:
     name: Conventional commits
