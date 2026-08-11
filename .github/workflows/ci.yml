@@ -5,12 +5,23 @@
 # copies; this workflow is the authority: it also runs the integration
 # suites (real Mongo via mongodb-memory-server), the coverage ratchet
 # (audit E-5) and the packaging check.
+#
+# Actions are pinned to commit SHAs (supply-chain: a moved tag cannot
+# change what runs here); Dependabot's github-actions ecosystem keeps
+# the pins current. Node comes from .nvmrc — one place to bump.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue re-runs these checks on the speculative merge commit;
+  # required checks must report on merge_group or the queue stalls.
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,11 +31,12 @@ jobs:
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run lint
@@ -32,15 +44,22 @@ jobs:
       # Spec integrity (decision 137): decision-log numbering, RESOLVIDA
       # references, code decision/QA markers, Makefile SCRUB completeness.
       - run: node scripts/spec-check.mjs
+      # The workflows themselves are prettier-ignored (YAML), so lint them
+      # with actionlint — expression typos and invalid `uses:` fail here.
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
 
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       # Workspace typecheck resolves @observability/core through its exports
@@ -51,34 +70,52 @@ jobs:
   test:
     name: Build, packaging check & tests (unit + integration, coverage ratchet)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
       # The integration suites boot mongodb-memory-server; cache the mongod
-      # binary download between runs.
-      - uses: actions/cache@v4
+      # binary download between runs. Keyed on the jest-mongodb configs so a
+      # mongod version bump gets a fresh cache; restore-keys still serves the
+      # previous binary as a starting point.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/mongodb-binaries
-          key: mongodb-binaries-${{ runner.os }}
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('packages/*/jest-mongodb-config.js') }}
+          restore-keys: |
+            mongodb-binaries-${{ runner.os }}-
       - run: npm ci
       # build → packaging-check → per-workspace jest with coverage
       # thresholds (the ratchet: a coverage DROP fails this step).
       - run: npm run test:ci
+      # Per-package coverage table + ratchet headroom in the run summary.
+      - name: Coverage summary
+        if: always()
+        run: node scripts/coverage-summary.mjs
+      - name: Upload lcov
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-lcov
+          path: packages/*/coverage/lcov.info
+          retention-days: 7
+          if-no-files-found: ignore
 
   commitlint:
     name: Conventional commits
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: >
@@ -86,3 +123,10 @@ jobs:
           --from ${{ github.event.pull_request.base.sha }}
           --to ${{ github.event.pull_request.head.sha }}
           --verbose
+      # Squash merges land the PR TITLE as the commit message on main, so
+      # the title must be a conventional commit too. Via env, never inline —
+      # a crafted title must not reach the shell as code.
+      - name: Lint PR title (future squash commit)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | npx commitlint --verbose

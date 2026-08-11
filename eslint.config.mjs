@@ -19,7 +19,9 @@ export default tseslint.config(
       'packages/ui/**',
       'loadtest/**',
       'demo-data/**',
-      'scripts/**',
+      // scripts/*.mjs (spec-check, packaging-check, coverage-summary) are
+      // CI gates — they get linted like everything else. The shell scripts
+      // beside them are out of eslint's jurisdiction anyway.
       'clients/**',
       'deploy/**',
       'docs/**',
