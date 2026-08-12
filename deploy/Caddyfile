@@ -15,6 +15,11 @@
 #     browsers refuse to send in a cross-origin iframe — the embed loads
 #     but never keeps the session. None (cookie is already Secure) makes
 #     it travel; better-auth's Origin checks remain the CSRF guard.
+#     Partitioned (CHIPS) on top: incognito Chrome blocks ALL third-party
+#     cookies regardless of SameSite, so iframe login silently looped
+#     (sign-in 200, cookie dropped — incident 2026-08-11). Partitioned
+#     cookies are exempt; the session is scoped per embedding site, and
+#     top-level visits are unaffected.
 #
 # DEPLOY STATE RULE: /etc/caddy/Caddyfile on the VM is written from THIS
 # file. No module/agent redeploy may touch /etc/caddy — and any manual
@@ -57,7 +62,7 @@ api.87-99-156-174.sslip.io {
 langwatch.87-99-156-174.sslip.io {
 	reverse_proxy 127.0.0.1:5563 {
 		header_down Content-Security-Policy "frame-ancestors 'none'" "frame-ancestors 'self' https://khal-demo-desktop.onrender.com"
-		header_down Set-Cookie "SameSite=Lax" "SameSite=None"
+		header_down Set-Cookie "SameSite=Lax" "SameSite=None; Partitioned"
 	}
 }
 
