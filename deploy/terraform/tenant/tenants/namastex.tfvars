@@ -3,8 +3,8 @@
 # 2026-08-10) — the permanent archive carries over untouched.
 
 region              = "sa-east-1"
-state_bucket        = "namastex-usage-tfstate-648426765611"
-state_bucket_region = "us-east-1"
+state_bucket        = "namastex-usage-tfstate-504557607647"
+state_bucket_region = "sa-east-1"
 
 client_name         = "namastex"
 client_timezone     = "America/Sao_Paulo"
