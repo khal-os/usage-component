@@ -271,6 +271,55 @@ Camada de leitura que serve a aba Billing a partir dos snapshots (meses fechados
 
 ---
 
+## Épico 9 — Integração com a plataforma Khal
+
+**Objetivo.** O componente já nasce khal-*ready* (decisões 103/132/133/141):
+o quarteto `KHAL_*` existe, o Basic é declaradamente interino e a saída dele
+é um ato explícito. Este épico é esse ato — trocar a porta da frente da API
+de senha para tokens da plataforma — DELIBERADAMENTE adiado até o silo Khal
+estar estável (decisão do usuário, 12/08/2026): discovery fail-closed
+significa que plataforma fora do ar = API de billing respondendo 401, e não
+se acopla a fatura a um alvo em movimento.
+
+### T12 — Cutover do Basic interino para bearer da plataforma (quarteto KHAL_*)
+
+Depois desta story a API autentica por token do Auth System do Khal
+(introspecção, authenticated-or-not — decisão 103) e o par Basic não existe
+mais em lugar nenhum. Os três pré-requisitos moram na PLATAFORMA (levantados
+2026-08-12 contra o código real do khal-platform — os contratos dos dois
+lados já batem):
+
+- **Pré-requisito P1 — discovery público alcançável:** `GET
+  {KHAL_DISCOVERY_URL}/.well-known/registers?tenant=<slug>` responde 200 SEM
+  credencial a partir do IP de egress do tenant (hoje `54.94.48.152` —
+  exatamente o IP estável que a decisão 142 criou para allowlists), payload
+  `{"registers":{"auth":{"url":…}}}` com `Cache-Control: max-age` (ADR-97).
+  No khal-platform isso é: rota em `public_routes` do API Gateway + CIDR do
+  tenant em `ALLOWED_CIDRS` (firewall do Pedro) — hoje o connector-register
+  já implementa a rota; o host final é decisão da plataforma e o module é
+  indiferente a ela (consome UMA URL).
+- **Pré-requisito P2 — tenant:** `KHAL_TENANT` = `publicTenant` do silo (o
+  doublecheck da ADR-97 responde 403 se divergir).
+- **Pré-requisito P3 — credencial do module:** client `client_credentials`
+  semeado no Auth System (o `/introspect` é protegido), análogo ao
+  `PLATFORM_SERVICE_CREDENTIALS` que o terraform do tenant Khal já semeia
+  para os registers.
+- **Cutover (lado componente, ~30 min):** `KHAL_CLIENT_ID/SECRET` entram no
+  secret JSON do tenant e o quarteto no task def (terraform);
+  `enable_basic_auth = false`; par `BASIC_AUTH_*` DELETADO do secret — a
+  exclusão mútua da decisão 141 recusa boot com os dois.
+- **Teste de aceite do gate:** `/api/v1/docs` segue aberto (decisão 103);
+  `GET /traces` responde 401 sem bearer e 200 com token emitido por
+  `POST /oauth/token` (client_credentials); discovery derrubada ⇒ fail
+  closed (401) com URL last-known servida durante refresh falho (decisão
+  132).
+- Consumidores (Farol, dashboards, scripts) migram `Authorization: Basic` →
+  `Bearer` — comunicado + par revogado no mesmo dia.
+
+*Habilita: entradas de catálogo/self-announce (fora de escopo aqui — o
+componente não se auto-registra por desenho) e qualquer RBAC futuro da
+plataforma.*
+
 ## Adiados — consolidado (pós-v1)
 
 | Área | Item | Prontidão do motor na v1 |
