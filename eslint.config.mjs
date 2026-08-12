@@ -16,6 +16,9 @@ export default tseslint.config(
       '**/dist/**',
       '**/coverage/**',
       '**/node_modules/**',
+      // agent worktrees are full repo copies living INSIDE the checkout —
+      // linting them doubles every error and trips on their tsconfigs
+      '.claude/worktrees/**',
       'loadtest/**',
       'demo-data/**',
       // scripts/*.mjs (spec-check, packaging-check, coverage-summary) are

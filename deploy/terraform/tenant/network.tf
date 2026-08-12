@@ -104,7 +104,8 @@ resource "aws_route_table_association" "private" {
 
 resource "aws_security_group" "alb" {
   name_prefix = "${local.name}-alb-"
-  description = "This tenant's public edge: 80/443 in"
+  # EC2 SG-description charset has no apostrophe and no non-ASCII
+  description = "This tenant public edge: 80/443 in"
   vpc_id      = aws_vpc.main.id
 
   ingress {
