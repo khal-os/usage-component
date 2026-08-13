@@ -172,9 +172,37 @@ attempt() {
 
 attempt "$TOKEN"
 
-cat "$BODY_FILE"; echo
 echo "HTTP ${CODE}"
-[[ "$CODE" =~ ^2 ]] || { echo "ERROR: registration failed"; exit 1; }
+if [[ "$CODE" =~ ^2 ]]; then
+  # NEVER print the body on success: the FIRST registration (201) carries the
+  # module's one-time clientSecret (secretDeliveredOnce). Print the clientId
+  # only and, when the aws CLI has credentials, store the pair per ADR-103 R9
+  # at khal/<tenant>/<env>/modules/<id>/m2m (keys == env var names).
+  python3 - "$BODY_FILE" "$TENANT" "${ENVIRONMENT:-production}" "$MODULE_ID" <<'PY'
+import json, subprocess, sys
+body = json.load(open(sys.argv[1]))
+tenant, env, module_id = sys.argv[2], sys.argv[3], sys.argv[4]
+client_id = body.get('clientId') or (body.get('manifest') or {}).get('identity', {}).get('clientId')
+print(f"registered rev: manifestVersion={((body.get('manifest') or body).get('manifestVersion'))} clientId={client_id}")
+if body.get('secretDeliveredOnce'):
+    name = f"khal/{tenant}/{env}/modules/{module_id}/m2m"
+    value = json.dumps({'KHAL_CLIENT_ID': body['clientId'], 'KHAL_CLIENT_SECRET': body['clientSecret']})
+    create = ['aws', 'secretsmanager', 'create-secret', '--name', name,
+              '--description', f'One-time m2m credential of module {module_id} (ADR-103 R9)',
+              '--secret-string', value]
+    r = subprocess.run(create, capture_output=True, text=True)
+    if r.returncode == 0:
+        print(f"one-time m2m credential stored at {name} (never printed)")
+    else:
+        # No AWS access or the secret exists: NEVER fall back to printing.
+        print(f"WARNING: one-time m2m credential NOT stored ({name}) — store it "
+              f"manually NOW from the catalog response; it never reappears. "
+              f"aws error: {r.stderr.strip().splitlines()[-1] if r.stderr else 'unknown'}")
+PY
+else
+  cat "$BODY_FILE"; echo
+  echo "ERROR: registration failed"; exit 1
+fi
 echo "module '${MODULE_ID}' v${VERSION} registered at ${KHAL_MODULE_CATALOG_URL} (tenant ${TENANT}) → ${ENDPOINT}"
 
 # Fluxo Deploy, passo final: o manifesto nasce desativado — sem esta ativação
