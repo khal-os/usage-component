@@ -15,6 +15,11 @@ mongo_usage_db_name = "example_usage"
 # non-khal tenants, never an omission.
 # khal_auth_url = "https://auth.<tenant-domain>"
 
+# Accepted `aud` claims of the session JWT (comma-separated, ANY matches).
+# The default already admits both apps that read the module's data —
+# override only to narrow.
+# khal_token_audience = "tracing,billing"
+
 # The SHA of the images this tenant runs (build-images tags; later deploys
 # move it via `make aws-deploy`, terraform ignores the drift).
 image_sha = "<git sha>"

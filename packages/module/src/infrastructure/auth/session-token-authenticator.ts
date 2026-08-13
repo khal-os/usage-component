@@ -8,8 +8,11 @@ export interface SessionTokenAuthenticatorOptions {
    * claim VERBATIM, and hosts the key set at {url}/.well-known/jwks.json.
    */
   authUrl: string;
-  /** Expected `aud` claim (KHAL_TOKEN_AUDIENCE, default `tracing`). */
-  audience: string;
+  /**
+   * Accepted `aud` claims (KHAL_TOKEN_AUDIENCE parsed as a comma-separated
+   * list, default `tracing,billing`) — a token matching ANY entry passes.
+   */
+  audiences: string[];
   /** Expected `tenant` claim (KHAL_TENANT) — physical isolation doublecheck. */
   tenant: string;
   /** JWKS fetch timeout (default 3000ms — same bound the introspector used). */
@@ -24,7 +27,8 @@ export interface SessionTokenAuthenticatorOptions {
  * refusing. Identity-only — no scopes (ADR-95): a token is accepted iff
  *   - the RS256 signature verifies against a published key,
  *   - `iss` equals KHAL_AUTH_URL,
- *   - `aud` equals KHAL_TOKEN_AUDIENCE,
+ *   - `aud` matches ANY entry of KHAL_TOKEN_AUDIENCE (multi-audience: the
+ *     Tracing AND Billing apps read this same module's data),
  *   - `tenant` equals KHAL_TENANT,
  *   - `exp` has not passed (jose refuses expired tokens by default).
  * Anything else — malformed token, JWKS unreachable/malformed, wrong any of
@@ -32,7 +36,7 @@ export interface SessionTokenAuthenticatorOptions {
  */
 export class SessionTokenAuthenticator implements TokenAuthenticator {
   private readonly authUrl: string;
-  private readonly audience: string;
+  private readonly audiences: string[];
   private readonly tenant: string;
   private readonly timeoutMs: number;
   private keySet?: ReturnType<typeof createLocalJWKSet>;
@@ -42,7 +46,7 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
 
   constructor(options: SessionTokenAuthenticatorOptions) {
     this.authUrl = options.authUrl;
-    this.audience = options.audience;
+    this.audiences = options.audiences;
     this.tenant = options.tenant;
     this.timeoutMs = options.timeoutMs ?? 3000;
   }
@@ -71,7 +75,8 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
       const { payload } = await jwtVerify(token, keySet, {
         algorithms: ['RS256'],
         issuer: this.authUrl,
-        audience: this.audience,
+        // jose accepts an array natively: the token's `aud` must match ANY.
+        audience: this.audiences,
       });
       return payload.tenant === this.tenant;
     } catch (error) {

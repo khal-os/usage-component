@@ -15,7 +15,7 @@ const errorMock = jest.fn();
 const loadFactory = async (config: {
   khalAuthUrl?: string;
   khalTenant?: string;
-  khalTokenAudience: string;
+  khalTokenAudiences: string[];
 }): Promise<typeof import('./auth-factory.js').makeAuthMiddleware> => {
   jest.resetModules();
   jest.doMock('../../infrastructure/index.js', () => ({ config }));
@@ -53,7 +53,7 @@ afterEach(() => {
 describe('makeAuthMiddleware (session gate wiring)', () => {
   it('MUST pass requests through AND warn loudly when KHAL_AUTH_URL is unset (open mode, PoC posture)', async () => {
     const makeAuthMiddleware = await loadFactory({
-      khalTokenAudience: 'tracing',
+      khalTokenAudiences: ['tracing', 'billing'],
     });
 
     const app = appWith(makeAuthMiddleware());
@@ -68,7 +68,7 @@ describe('makeAuthMiddleware (session gate wiring)', () => {
     const makeAuthMiddleware = await loadFactory({
       khalAuthUrl: 'https://auth.khal-usage.com',
       khalTenant: 'namastex',
-      khalTokenAudience: 'tracing',
+      khalTokenAudiences: ['tracing', 'billing'],
     });
 
     const app = appWith(makeAuthMiddleware());
@@ -92,7 +92,7 @@ describe('makeAuthMiddleware (session gate wiring)', () => {
       const makeAuthMiddleware = await loadFactory({
         khalAuthUrl: 'https://auth.khal-usage.com',
         khalTenant: 'namastex',
-        khalTokenAudience: 'tracing',
+        khalTokenAudiences: ['tracing', 'billing'],
       });
 
       const app = appWith(makeAuthMiddleware());
@@ -109,7 +109,7 @@ describe('makeAuthMiddleware (session gate wiring)', () => {
   it('MUST fail closed (all 401) and log an error when KHAL_AUTH_URL is set without KHAL_TENANT', async () => {
     const makeAuthMiddleware = await loadFactory({
       khalAuthUrl: 'https://auth.khal-usage.com',
-      khalTokenAudience: 'tracing',
+      khalTokenAudiences: ['tracing', 'billing'],
     });
 
     const app = appWith(makeAuthMiddleware());
