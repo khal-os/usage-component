@@ -26,9 +26,9 @@ jobs:
         # usage-db-backup carries no platform- prefix on purpose: it is
         # the backup of the tenant's usage DB, not of the platform.
         include:
-          - { image: platform-module, dockerfile: module }
-          - { image: platform-connector, dockerfile: connector }
-          - { image: usage-db-backup, dockerfile: usage-db-backup }
+          - { image: khal/namastex/production/usage-module, dockerfile: module }
+          - { image: khal/namastex/production/usage-connector, dockerfile: connector }
+          - { image: khal/namastex/production/usage-db-backup, dockerfile: usage-db-backup }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

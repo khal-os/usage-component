@@ -2,9 +2,10 @@
 # mode (decision 140) — MONGO_DB_ATLAS is a constant, and host/credentials
 # come from the tenant secret (never tfvars, never state-visible env).
 locals {
-  module_image = "${local.fdn.ecr_repository_urls["platform-module"]}:${var.image_sha}"
-  conn_image   = "${local.fdn.ecr_repository_urls["platform-connector"]}:${var.image_sha}"
-  backup_image = "${local.fdn.ecr_repository_urls["usage-db-backup"]}:${var.image_sha}"
+  # ADR-103 R8: four-axis repos (foundation's canonical output).
+  module_image = "${local.fdn.ecr_repository_urls_v2["usage-module"]}:${var.image_sha}"
+  conn_image   = "${local.fdn.ecr_repository_urls_v2["usage-connector"]}:${var.image_sha}"
+  backup_image = "${local.fdn.ecr_repository_urls_v2["usage-db-backup"]}:${var.image_sha}"
 
   mongo_env = [
     { name = "MONGO_DB_ATLAS", value = "true" },
@@ -13,7 +14,7 @@ locals {
 
   mongo_secrets = [
     for k in ["MONGO_DB_HOST", "MONGO_DB_USER", "MONGO_DB_PASSWORD"] :
-    { name = k, valueFrom = "${aws_secretsmanager_secret.tenant.arn}:${k}::" }
+    { name = k, valueFrom = "${aws_secretsmanager_secret.usage["mongo"].arn}:${k}::" }
   ]
 
   base_env = concat(local.mongo_env, [
@@ -26,7 +27,7 @@ locals {
   ])
 
   log_conf = {
-    for k, g in aws_cloudwatch_log_group.services :
+    for k, g in aws_cloudwatch_log_group.services_v2 :
     k => {
       logDriver = "awslogs"
       options = {
@@ -110,7 +111,7 @@ resource "aws_ecs_task_definition" "api" {
     # only when the KHAL quartet takes over.
     secrets = concat(local.mongo_secrets, var.enable_basic_auth ? [
       for k in ["BASIC_AUTH_USER", "BASIC_AUTH_PASSWORD"] :
-      { name = k, valueFrom = "${aws_secretsmanager_secret.tenant.arn}:${k}::" }
+      { name = k, valueFrom = "${aws_secretsmanager_secret.usage["basic-auth"].arn}:${k}::" }
     ] : [])
     logConfiguration = local.log_conf["api"]
   }])

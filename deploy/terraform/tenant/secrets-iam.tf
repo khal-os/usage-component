@@ -1,22 +1,58 @@
-# One Secrets Manager JSON per tenant (the [SECRET→SM] contract from
-# clients/example.production.env). Terraform creates the SHELL; the VALUE
-# is set by the operator (RUNBOOK-AWS.md §onboarding) and never transits
-# state or git:
-#   aws secretsmanager put-secret-value --secret-id usage/<client> \
-#     --secret-string '{"MONGO_DB_HOST":"...","MONGO_DB_USER":"...",
-#       "MONGO_DB_PASSWORD":"...","LW_NEXTAUTH_SECRET":"...",
-#       "LW_API_TOKEN_JWT_SECRET":"...","LW_CREDENTIALS_SECRET":"..."}'
+# Tenant secrets (the [SECRET→SM] contract from clients/example.production.env).
+# ADR-103: one JSON secret per FAMILY at khal/<client>/<env>/usage/{mongo,
+# langwatch,basic-auth}, keys == env var names. Terraform creates the SHELLS;
+# VALUES are set by the operator (RUNBOOK-AWS.md §onboarding) or by
+# deploy/scripts/migrate-adr103.sh (which splits the legacy usage/<client>
+# JSON, renaming LW_* keys to LANGWATCH_*) and never transit state or git:
+#   aws secretsmanager put-secret-value \
+#     --secret-id khal/<client>/<env>/usage/mongo \
+#     --secret-string '{"MONGO_DB_HOST":"...","MONGO_DB_USER":"...","MONGO_DB_PASSWORD":"..."}'
+# LEGACY (ADR-103 step A) — kept until step B; the canonical secrets below
+# take over the task defs in this same apply.
 resource "aws_secretsmanager_secret" "tenant" {
   name = "usage/${var.client_name}"
+}
+
+# ── Canonical secrets (ADR-103): khal/<client>/<env>/usage/<family> ─────────
+# One JSON secret per family, keys == the env var names (R2). Terraform
+# creates the SHELL with an empty JSON; VALUES come from the operator or the
+# migrate-adr103.sh script (which splits the legacy JSON and renames the
+# LW_* keys to LANGWATCH_*) — never through state or git.
+resource "aws_secretsmanager_secret" "usage" {
+  for_each = toset(["mongo", "langwatch", "basic-auth"])
+
+  name = "${local.sm_base}/${each.key}"
+}
+
+resource "aws_secretsmanager_secret_version" "usage_seed" {
+  for_each = aws_secretsmanager_secret.usage
+
+  secret_id     = each.value.id
+  secret_string = "{}"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
 
 # LANGWATCH_PROJECT_ID starts EMPTY on purpose (audit G-1): the connector
 # exits 1 in a visible restart loop until onboarding writes the real value
 # (runbook) — never an idle that reads healthy.
+# LEGACY path — kept until step B.
 resource "aws_ssm_parameter" "langwatch_project_id" {
   name  = "/usage/${var.client_name}/langwatch-project-id"
   type  = "String"
   value = " " # placeholder — set by onboarding; ignore drift below
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "langwatch_project_id_v2" {
+  name  = "${local.ssm_base}/langwatch-project-id"
+  type  = "String"
+  value = " " # placeholder — set by onboarding/migration; ignore drift below
 
   lifecycle {
     ignore_changes = [value]
@@ -50,13 +86,20 @@ resource "aws_iam_role_policy_attachment" "execution_base" {
 
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.tenant.arn]
+    actions = ["secretsmanager:GetSecretValue"]
+    # Canonical family secrets + the legacy JSON (until step B).
+    resources = concat(
+      [for s in aws_secretsmanager_secret.usage : s.arn],
+      [aws_secretsmanager_secret.tenant.arn],
+    )
   }
 
   statement {
-    actions   = ["ssm:GetParameters"]
-    resources = [aws_ssm_parameter.langwatch_project_id.arn]
+    actions = ["ssm:GetParameters"]
+    resources = [
+      aws_ssm_parameter.langwatch_project_id_v2.arn,
+      aws_ssm_parameter.langwatch_project_id.arn,
+    ]
   }
 }
 
@@ -121,9 +164,18 @@ resource "aws_iam_role_policy" "backup_s3" {
 
 # ── Log groups (one per service, tenant-prefixed) ────────────────────────────
 
+# LEGACY groups — kept until step B so history stays queryable in place.
 resource "aws_cloudwatch_log_group" "services" {
   for_each = toset(["api", "connector", "scheduler", "backup"])
 
   name              = "/usage/${var.client_name}/${each.key}"
+  retention_in_days = 90
+}
+
+# Canonical groups (ADR-103): the task defs log here from this apply on.
+resource "aws_cloudwatch_log_group" "services_v2" {
+  for_each = toset(["api", "connector", "scheduler", "backup"])
+
+  name              = "${local.ssm_base}/${each.key}"
   retention_in_days = 90
 }

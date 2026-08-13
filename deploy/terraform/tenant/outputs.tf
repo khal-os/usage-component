@@ -21,9 +21,14 @@ output "tenant_secret_arn" {
   value       = aws_secretsmanager_secret.tenant.arn
 }
 
+output "usage_secret_arns" {
+  description = "Canonical family secrets (ADR-103): khal/<client>/<env>/usage/{mongo,langwatch,basic-auth}."
+  value       = { for k, s in aws_secretsmanager_secret.usage : k => s.arn }
+}
+
 output "langwatch_project_id_parameter" {
   description = "Write the real project id here after LangWatch onboarding."
-  value       = aws_ssm_parameter.langwatch_project_id.name
+  value       = aws_ssm_parameter.langwatch_project_id_v2.name
 }
 
 output "service_names" {

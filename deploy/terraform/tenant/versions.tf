@@ -47,4 +47,8 @@ locals {
   api_hostname       = "${var.client_name}-api.${local.fdn.base_domain}"
   langwatch_hostname = "${var.client_name}-langwatch.${local.fdn.base_domain}"
   name               = "usage-${var.client_name}"
+  # ADR-103 canonical path bases (Tier 1: SM/SSM/log groups/ECR carry the
+  # khal/<tenant>/<env>/<component> axes; AWS resource identities stay usage-*).
+  sm_base  = "khal/${var.client_name}/${var.environment}/usage"
+  ssm_base = "/khal/${var.client_name}/${var.environment}/usage"
 }
