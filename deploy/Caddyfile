@@ -6,7 +6,7 @@
 #   - CORS on the API at the PROXY layer: every response carries it,
 #     including 4xx/5xx and caddy-generated errors (502) that app-level
 #     CORS can never cover. Wildcard is acceptable while the API is
-#     public/credential-less; with KHAL_DISCOVERY_URL on, prefer the module's
+#     public/credential-less; with KHAL_AUTH_URL on, prefer the module's
 #     CORS_ALLOWED_ORIGINS (exact-origin echo, audit D-1) and drop it here.
 #   - LangWatch CSP rewrite: upstream sends `frame-ancestors 'none'`,
 #     which blocks embedding in the demo desktop. Substitute ONLY that

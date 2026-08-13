@@ -43,7 +43,7 @@ export interface EnvironmentVariables
  * Optional env string where EMPTY means unset. Compose forwards these vars
  * with `${VAR:-}` defaults, so an env file that omits them delivers '' to
  * the container — which must behave exactly like the var not existing
- * (e.g. an empty KHAL_DISCOVERY_URL must not half-enable auth).
+ * (e.g. an empty KHAL_AUTH_URL must not half-enable auth).
  */
 const optionalNonEmptyString = z
   .string()
@@ -93,19 +93,16 @@ const envSchema = z
     CLIENT_TIMEZONE: z
       .string()
       .min(1, 'CLIENT_TIMEZONE is required (decision 130)'),
-    // Canonical khal consumer surface (ADR-97; the ONLY spelling — the
-    // pre-discovery AUTH_SYSTEM_* names were removed pre-prod, decision
-    // 133): discovery + tenant resolve the Auth System URL at runtime; the
-    // credential authenticates /introspect.
-    KHAL_DISCOVERY_URL: optionalNonEmptyString,
+    // Session auth (ADR-103 naming): the khal-auth base URL. SET → every
+    // /api/v1 request must carry a Bearer session JWT verified against
+    // ${KHAL_AUTH_URL}/.well-known/jwks.json (RS256, iss == KHAL_AUTH_URL,
+    // aud == KHAL_TOKEN_AUDIENCE, tenant claim == KHAL_TENANT). UNSET →
+    // API open, PoC posture (decision 133 style) — said loudly at boot.
+    KHAL_AUTH_URL: optionalNonEmptyString,
     KHAL_TENANT: optionalNonEmptyString,
-    KHAL_CLIENT_ID: optionalNonEmptyString,
-    KHAL_CLIENT_SECRET: optionalNonEmptyString,
-    // Decision 141: INTERIM edge gate until the KHAL quartet has real
-    // infra. Constraints enforced in the superRefine below the object:
-    // both-or-neither, and never alongside the quartet.
-    BASIC_AUTH_USER: optionalNonEmptyString,
-    BASIC_AUTH_PASSWORD: optionalNonEmptyString,
+    // Expected `aud` of the session JWT; defaults to `tracing` in the
+    // transform below.
+    KHAL_TOKEN_AUDIENCE: optionalNonEmptyString,
     // audit D-1: cross-origin is an explicit operator act — exact origins,
     // comma-separated; unset/empty = same-origin only (no CORS headers).
     CORS_ALLOWED_ORIGINS: optionalNonEmptyString,
@@ -126,35 +123,22 @@ const envSchema = z
     ...logEnvSchemaShape,
   })
   .superRefine((env, ctx) => {
-    // Decision 141, fail-fast (decision 139's convention): half a
-    // credential pair must never half-enable auth, and running BOTH gates
-    // hides "which one 401'd me" — switching to platform auth means
-    // DELETING the BASIC_AUTH_* knobs, said out loud at boot.
-    const basicCount = [env.BASIC_AUTH_USER, env.BASIC_AUTH_PASSWORD].filter(
-      Boolean,
-    ).length;
-
-    if (basicCount === 1) {
+    // Fail-fast (decision 139's convention, mirroring the old both-or-
+    // neither Basic refine): auth was INTENDED — a missing tenant must
+    // never half-enable it (the validator could not check the `tenant`
+    // claim and would either fail everything or, worse, check nothing).
+    if (env.KHAL_AUTH_URL && !env.KHAL_TENANT) {
       ctx.addIssue({
         code: 'custom',
         message:
-          'BASIC_AUTH_USER and BASIC_AUTH_PASSWORD must be set TOGETHER ' +
-          '(decision 141) — half a pair would half-enable auth',
-      });
-    }
-
-    if (basicCount > 0 && env.KHAL_DISCOVERY_URL) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'BASIC_AUTH_* and KHAL_DISCOVERY_URL are mutually exclusive ' +
-          '(decision 141) — the quartet replaces the interim gate: delete ' +
-          'the BASIC_AUTH_* knobs when switching',
+          'KHAL_TENANT is required when KHAL_AUTH_URL is set — session ' +
+          'validation checks the `tenant` claim against it',
       });
     }
   })
   .transform((env) => ({
     ...env,
+    KHAL_TOKEN_AUDIENCE: env.KHAL_TOKEN_AUDIENCE ?? 'tracing',
     SERVER_PORT: parseInt(env.SERVER_PORT, 10),
     BILLING_AUTO_CLOSE_DELAY_MINUTES: env.BILLING_AUTO_CLOSE_DELAY_MINUTES
       ? parseInt(env.BILLING_AUTO_CLOSE_DELAY_MINUTES, 10)
@@ -216,13 +200,10 @@ export const environment: EnvironmentVariables = {
   clientName: safeEnvironment.CLIENT_NAME || undefined,
   clientTimezone: safeEnvironment.CLIENT_TIMEZONE,
   // '' → undefined already guaranteed by optionalNonEmptyString above.
-  khalDiscoveryUrl: safeEnvironment.KHAL_DISCOVERY_URL,
+  khalAuthUrl: safeEnvironment.KHAL_AUTH_URL,
   khalTenant: safeEnvironment.KHAL_TENANT,
+  khalTokenAudience: safeEnvironment.KHAL_TOKEN_AUDIENCE,
   corsAllowedOrigins: safeEnvironment.CORS_ALLOWED_ORIGINS,
-  khalClientId: safeEnvironment.KHAL_CLIENT_ID,
-  khalClientSecret: safeEnvironment.KHAL_CLIENT_SECRET,
-  basicAuthUser: safeEnvironment.BASIC_AUTH_USER,
-  basicAuthPassword: safeEnvironment.BASIC_AUTH_PASSWORD,
   billingAutoCloseDelayMinutes:
     safeEnvironment.BILLING_AUTO_CLOSE_DELAY_MINUTES,
   billingAutoCloseCheckIntervalSeconds:

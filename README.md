@@ -189,20 +189,18 @@ requires the explicit `TRACE_SOURCE=fixtures` (offline demos only).
 
 ## API auth (env-gated, off by default)
 
-Set the khal quartet in the client env — `KHAL_DISCOVERY_URL` +
-`KHAL_TENANT` (the Auth System URL is resolved at runtime from
-`/.well-known/registers`, ADR-97) + `KHAL_CLIENT_ID`/`KHAL_CLIENT_SECRET` —
-and every `/api/v1` request must carry `Authorization: Bearer <M2M token>`.
-The module validates by **introspection** (RFC 7662): it forwards the token
-and reads only `active` — authenticated-or-not, no scope or tenant logic
-here (that's the platform's M2M model). Introspection is itself a protected
-endpoint, so the module needs its **own** M2M credential (the
-`KHAL_CLIENT_*` pair, sent as Basic) — without it, and whenever the Auth
-System is unreachable or discovery never resolved, requests answer 401
-(fail closed). The `KHAL_*` quartet is the ONLY spelling — the
-pre-discovery `AUTH_SYSTEM_*` names were removed before any production
-deployment (decision 133). Nothing configured → the API is open,
-the original PoC behavior.
+Set `KHAL_AUTH_URL` + `KHAL_TENANT` in the client env and every `/api/v1`
+request must carry `Authorization: Bearer <session JWT>` issued by
+khal-auth. The module validates **locally**: RS256 signature against the
+JWKS at `${KHAL_AUTH_URL}/.well-known/jwks.json` (fetched once, cached in
+memory, re-fetched on an unknown `kid`), `iss` == `KHAL_AUTH_URL`, `aud` ==
+`KHAL_TOKEN_AUDIENCE` (default `tracing`), `tenant` claim == `KHAL_TENANT`,
+`exp` in the future. Identity-only — no scopes (ADR-95). Anything off —
+bad signature, wrong claim, expired token, JWKS unreachable — answers 401
+(fail closed). `KHAL_TENANT` is required whenever the URL is set (the boot
+refuses half a pair). Nothing configured → the API is open, the original
+PoC behavior, warned loudly at boot. The interim HTTP Basic gate
+(decision 141, `BASIC_AUTH_*`) is retired — no aliases.
 `/api/v1/docs` stays open either way (container healthcheck).
 
 ## LangWatch (per client, inside the deployment)

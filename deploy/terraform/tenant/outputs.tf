@@ -17,7 +17,7 @@ output "clickhouse_private_url" {
 }
 
 output "usage_secret_arns" {
-  description = "Canonical family secrets (ADR-103): khal/<client>/<env>/usage/{mongo,langwatch,basic-auth}."
+  description = "Canonical family secrets (ADR-103): khal/<client>/<env>/usage/{mongo,langwatch}."
   value       = { for k, s in aws_secretsmanager_secret.usage : k => s.arn }
 }
 

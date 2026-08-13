@@ -44,11 +44,13 @@ tenant, nothing defaults).
      "LANGWATCH_CREDENTIALS_SECRET": "<openssl rand -base64 32 — NEVER change after first boot>",
      "LANGWATCH_CLICKHOUSE_PASSWORD": "langwatch"
    }'
-   aws secretsmanager put-secret-value --secret-id khal/<client>/production/usage/basic-auth --secret-string '{
-     "BASIC_AUTH_USER": "<client slug is fine>",
-     "BASIC_AUTH_PASSWORD": "<openssl rand -base64 24 — decision 141; drop the pair (and set enable_basic_auth=false) only when the KHAL quartet takes over>"
-   }'
    ```
+   API auth is session-JWT (khal-auth), configured entirely by tfvars —
+   set `khal_auth_url` in `tenants/<client>.tfvars` and the api task gets
+   `KHAL_AUTH_URL` + `KHAL_TENANT`; no auth secret exists. (The interim
+   Basic gate of decision 141 is retired: the old
+   `khal/<client>/production/usage/basic-auth` secret is read by nothing
+   and can be deleted.)
    The EC2 needs NOTHING: `langwatch-bootstrap.service` retries every 30s
    until the secret exists, then brings the stack up itself. Just force new
    deployments of the ECS services (or let the first deploy roll them).

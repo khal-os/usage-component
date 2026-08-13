@@ -105,14 +105,15 @@ variable "api_autoscale_max" {
   default     = 4
 }
 
-variable "enable_basic_auth" {
+variable "khal_auth_url" {
   description = <<-EOT
-    Decision 141: interim HTTP Basic gate on /api/v1 (BASIC_AUTH_USER /
-    BASIC_AUTH_PASSWORD keys must then exist in the tenant secret). Turn
-    OFF only when the KHAL quartet is configured — a public open API is a
-    declared decision, never an omission. No default (decision 139).
+    khal-auth base URL — session-JWT gate on /api/v1 (replaces the interim
+    Basic gate, decision 141). Empty = auth OFF (the API answers OPEN — a
+    deliberate posture for non-khal tenants, warned loudly at boot).
+    KHAL_TENANT rides along automatically (var.client_name).
   EOT
-  type        = bool
+  type        = string
+  default     = ""
 }
 
 variable "cors_allowed_origins" {

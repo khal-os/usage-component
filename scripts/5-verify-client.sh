@@ -26,12 +26,12 @@ wait_live "aguardando API" "http://localhost:${API_PORT}/api/v1/docs/" check_api
   || die "API não respondeu em http://localhost:${API_PORT} — veja: make logs CLIENT=${NAME}"
 
 # ---------- health: auth ----------
-# When the env file enables auth (KHAL_DISCOVERY_URL preenchido), prove it
-# actually reached the container: a tokenless request MUST answer 401. Any
-# other answer means the API is serving the archive open despite the env —
-# the exact silent-fail this check exists to catch.
-KHAL_DISCOVERY_URL="$(get KHAL_DISCOVERY_URL)"
-if [[ -n "$KHAL_DISCOVERY_URL" ]]; then
+# When the env file enables auth (KHAL_AUTH_URL set), prove it actually
+# reached the container: a tokenless request MUST answer 401. Any other
+# answer means the API is serving the archive open despite the env — the
+# exact silent-fail this check exists to catch.
+KHAL_AUTH_URL="$(get KHAL_AUTH_URL)"
+if [[ -n "$KHAL_AUTH_URL" ]]; then
   step "auth habilitado no env — verificando fail-closed sem token"
   AUTH_URL="http://localhost:${API_PORT}/api/v1/traces"
   AUTH_CODE="$(curl -s -o /dev/null -m 8 -w '%{http_code}' "$AUTH_URL" || true)"
@@ -41,7 +41,7 @@ if [[ -n "$KHAL_DISCOVERY_URL" ]]; then
   [[ "$AUTH_CODE" != "000" ]] \
     || die "a API não respondeu em ${AUTH_URL} — sem resposta HTTP, não dá para verificar o auth (a stack está no ar? make up CLIENT=${NAME}; confira API_PORT em ${ENVFILE})"
   [[ "$AUTH_CODE" == "401" ]] \
-    || die "KHAL_DISCOVERY_URL está definido em ${ENVFILE}, mas GET /api/v1/traces SEM token respondeu ${AUTH_CODE} (esperado: 401) — o auth não chegou ao container (recrie a stack: make up CLIENT=${NAME})"
+    || die "KHAL_AUTH_URL está definido em ${ENVFILE}, mas GET /api/v1/traces SEM token respondeu ${AUTH_CODE} (esperado: 401) — o auth não chegou ao container (recrie a stack: make up CLIENT=${NAME})"
   sub "sem token → 401 (fail closed)"
 fi
 

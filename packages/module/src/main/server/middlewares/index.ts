@@ -1,5 +1,4 @@
 export * from './auth.js';
-export * from './basic-auth.js';
 export * from './body-parser.js';
 export * from './cors.js';
 export * from './default-content-type.js';

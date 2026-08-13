@@ -80,15 +80,14 @@ const errorResponse = (description: string) => ({
 
 /**
  * Shared 401 (C-4.1): auth is env-gated — active only when the deployment
- * points at the khal platform (KHAL_DISCOVERY_URL — decisions 84/132);
- * without it the API answers open (PoC behavior) and this response never
- * occurs.
+ * points at khal-auth (KHAL_AUTH_URL); without it the API answers open (PoC
+ * behavior) and this response never occurs.
  */
 const unauthorizedResponse = () =>
   errorResponse(
-    'Token Bearer ausente ou rejeitado pelo Auth System. Só ocorre quando ' +
-      'KHAL_DISCOVERY_URL está configurada no deployment — sem ela a API ' +
-      'responde aberta (comportamento PoC).',
+    'Bearer session token missing or rejected. Only occurs when ' +
+      'KHAL_AUTH_URL is configured in the deployment — without it the API ' +
+      'answers open (PoC behavior).',
   );
 
 const okResponse = (description: string, schema: z.ZodType) => ({
@@ -214,12 +213,14 @@ export const buildOpenApiDocument = (clientName?: string) => ({
         type: 'http',
         scheme: 'bearer',
         description:
-          'Auth M2M condicionada por ambiente (decisão 84): exigida apenas ' +
-          'quando o deployment configura KHAL_DISCOVERY_URL — o token é ' +
-          'validado por introspecção no khal Auth System (autenticado ou ' +
-          'não, sem escopos). Sem a variável, a API responde aberta (PoC). ' +
-          'As rotas de docs (/api/v1/docs* e openapi.json) permanecem ' +
-          'abertas — são o healthcheck.',
+          'Env-gated session auth: required only when the deployment ' +
+          'configures KHAL_AUTH_URL — the token is a khal-auth session JWT ' +
+          'verified locally against the JWKS at ' +
+          '{KHAL_AUTH_URL}/.well-known/jwks.json (RS256; iss, aud and ' +
+          'tenant claims checked; identity-only, no scopes). Without the ' +
+          'variable the API answers open (PoC). The docs routes ' +
+          '(/api/v1/docs* and openapi.json) stay open — they are the ' +
+          'healthcheck.',
       },
     },
   },

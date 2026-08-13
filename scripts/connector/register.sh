@@ -10,10 +10,10 @@
 # Auth is identity-only (valid token + right tenant) — there are NO scopes in
 # the M2M model. Token precedence:
 #   1. TOKEN                     — explicit token, used as-is
-#   2. KHAL_CLIENT_ID/SECRET     — with AUTH_SYSTEM_URL: a session is requested
-#                                  from the M2M Auth System (client_credentials;
-#                                  sessions expire — each run requests a fresh
-#                                  one, there is no renew)
+#   2. KHAL_CLIENT_ID/SECRET     — with KHAL_AUTH_SYSTEM_URL: a session is
+#                                  requested from the M2M Auth System
+#                                  (client_credentials; sessions expire — each
+#                                  run requests a fresh one, there is no renew)
 #   3. dev claims token          — minted below (base64url JSON, no scopes)
 #
 # The local catalog stores manifests IN MEMORY — run this again after every
@@ -26,37 +26,26 @@
 #     pnpm --filter @khal/connector-register dev
 #
 # Env overrides (all optional):
-#   CONNECTOR_CATALOG_URL  default http://127.0.0.1:7103 (the Connector Catalog)
+#   KHAL_CONNECTOR_CATALOG_URL  default http://127.0.0.1:7103 (the Connector Catalog)
 #   CONNECTOR_ID   default langwatch
 #   OTLP_ENDPOINT  default http://localhost:5562/api/otel/v1/traces
 #   CREDENTIAL_REF default workos-vault://<CONNECTOR_ID> — MUST match a key of
 #                  the catalog's VAULT_CREDENTIALS_JSON for the resolved
 #                  credential to be real
 #   VERSION        default: contents of scripts/connector/version
-#   KHAL_DISCOVERY_URL the silo's discovery base (ADR-97) — resolves
-#                  CONNECTOR_CATALOG_URL and AUTH_SYSTEM_URL from /.well-known/registers
-#                  (explicitly set vars win over resolved ones)
 #   KHAL_TENANT    tenant slug (default acme)
-#   AUTH_SYSTEM_URL    the M2M Auth System base URL (enables the session path)
+#   KHAL_AUTH_SYSTEM_URL  the M2M Auth System base URL (enables the session path)
 #   KHAL_CLIENT_ID     the connector's M2M credential id
 #   KHAL_CLIENT_SECRET the connector's credential secret
 #   TOKEN          explicit token for the PUT (wins over everything)
 set -euo pipefail
 
-# Canonical khal spellings only (decision 133 — legacy names removed pre-prod).
+# Canonical khal spellings only (ADR-103 URL family — discovery is gone,
+# the explicit catalog/auth URLs are the only inputs).
 TENANT="${KHAL_TENANT:-acme}"
 KHAL_CLIENT_ID="${KHAL_CLIENT_ID:-}"
 KHAL_CLIENT_SECRET="${KHAL_CLIENT_SECRET:-}"
-# ADR-97: one discovery URL resolves catalog + auth. Explicit vars win.
-CONNECTOR_CATALOG_URL="${CONNECTOR_CATALOG_URL:-}"
-if [[ -n "${KHAL_DISCOVERY_URL:-}" ]]; then
-  discovery_json=$(curl -sS "${KHAL_DISCOVERY_URL%/}/.well-known/registers?tenant=${TENANT}")
-  [[ -z "$CONNECTOR_CATALOG_URL" ]] && CONNECTOR_CATALOG_URL=$(python3 -c \
-    "import json,sys;print(json.loads(sys.argv[1])['registers']['connectors'])" "$discovery_json")
-  [[ -z "${AUTH_SYSTEM_URL:-}" ]] && AUTH_SYSTEM_URL=$(python3 -c \
-    "import json,sys;print(json.loads(sys.argv[1])['registers']['auth']['url'])" "$discovery_json")
-fi
-CONNECTOR_CATALOG_URL="${CONNECTOR_CATALOG_URL:-http://127.0.0.1:7103}"
+KHAL_CONNECTOR_CATALOG_URL="${KHAL_CONNECTOR_CATALOG_URL:-http://127.0.0.1:7103}"
 CONNECTOR_ID="${CONNECTOR_ID:-langwatch}"
 OTLP_ENDPOINT="${OTLP_ENDPOINT:-http://localhost:5562/api/otel/v1/traces}"
 CREDENTIAL_REF="${CREDENTIAL_REF:-workos-vault://${CONNECTOR_ID}}"
@@ -72,7 +61,7 @@ VERSION="${VERSION:-$(tr -d '[:space:]' <"$(dirname "$0")/version")}"
 # Session from the M2M Auth System (the target platform flow): credentials in,
 # short-lived session out. No scopes are requested — identity only.
 m2m_session() {
-  curl -sS -X POST "${AUTH_SYSTEM_URL%/}/oauth/token" \
+  curl -sS -X POST "${KHAL_AUTH_SYSTEM_URL%/}/oauth/token" \
     -H 'content-type: application/x-www-form-urlencoded' \
     --data-urlencode 'grant_type=client_credentials' \
     --data-urlencode "client_id=${KHAL_CLIENT_ID}" \
@@ -90,9 +79,9 @@ print(base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
 }
 
 if [[ -z "${TOKEN:-}" ]]; then
-  if [[ -n "${AUTH_SYSTEM_URL:-}" && -n "${KHAL_CLIENT_ID:-}" && -n "${KHAL_CLIENT_SECRET:-}" ]]; then
+  if [[ -n "${KHAL_AUTH_SYSTEM_URL:-}" && -n "${KHAL_CLIENT_ID:-}" && -n "${KHAL_CLIENT_SECRET:-}" ]]; then
     TOKEN="$(m2m_session)"
-    echo "session obtained from the M2M Auth System (${AUTH_SYSTEM_URL})"
+    echo "session obtained from the M2M Auth System (${KHAL_AUTH_SYSTEM_URL})"
   else
     TOKEN="$(dev_token)"
   fi
@@ -141,9 +130,9 @@ attempt() {
   local etag
   etag=$(curl -s -o /dev/null -w '%{header_json}' \
     -H "Authorization: Bearer ${token}" \
-    "${CONNECTOR_CATALOG_URL}/connectors/${CONNECTOR_ID}" \
+    "${KHAL_CONNECTOR_CATALOG_URL}/connectors/${CONNECTOR_ID}" \
     | python3 -c "import json,sys;h=json.load(sys.stdin);print((h.get('etag') or [''])[0])")
-  local args=(-sS -X PUT "${CONNECTOR_CATALOG_URL}/connectors/${CONNECTOR_ID}"
+  local args=(-sS -X PUT "${KHAL_CONNECTOR_CATALOG_URL}/connectors/${CONNECTOR_ID}"
     -H "Authorization: Bearer ${token}" -H 'content-type: application/json'
     -o "$BODY_FILE" -w '%{http_code}' -d "${MANIFEST}")
   [[ -n "$etag" ]] && args+=(-H "If-Match: ${etag}")
@@ -155,4 +144,4 @@ attempt "$TOKEN"
 cat "$BODY_FILE"; echo
 echo "HTTP ${CODE}"
 [[ "$CODE" =~ ^2 ]] || { echo "ERROR: registration failed"; exit 1; }
-echo "connector '${CONNECTOR_ID}' v${VERSION} registered at ${CONNECTOR_CATALOG_URL} (tenant ${TENANT}) → ${OTLP_ENDPOINT}"
+echo "connector '${CONNECTOR_ID}' v${VERSION} registered at ${KHAL_CONNECTOR_CATALOG_URL} (tenant ${TENANT}) → ${OTLP_ENDPOINT}"

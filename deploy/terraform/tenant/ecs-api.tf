@@ -106,13 +106,13 @@ resource "aws_ecs_task_definition" "api" {
     environment = concat(local.base_env, [
       { name = "SERVER_PORT", value = "3000" },
       { name = "CORS_ALLOWED_ORIGINS", value = var.cors_allowed_origins },
+      # Session auth (replaces the Basic gate of decision 141): empty URL =
+      # auth OFF ('' is treated as unset by the app — never half-enables).
+      # KHAL_TENANT is the tenant-claim doublecheck; only the api needs it.
+      { name = "KHAL_AUTH_URL", value = var.khal_auth_url },
+      { name = "KHAL_TENANT", value = var.client_name },
     ])
-    # Decision 141: the interim gate's pair rides the tenant secret; off
-    # only when the KHAL quartet takes over.
-    secrets = concat(local.mongo_secrets, var.enable_basic_auth ? [
-      for k in ["BASIC_AUTH_USER", "BASIC_AUTH_PASSWORD"] :
-      { name = k, valueFrom = "${aws_secretsmanager_secret.usage["basic-auth"].arn}:${k}::" }
-    ] : [])
+    secrets          = local.mongo_secrets
     logConfiguration = local.log_conf["api"]
   }])
 }
