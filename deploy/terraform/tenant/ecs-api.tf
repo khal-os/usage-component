@@ -111,6 +111,9 @@ resource "aws_ecs_task_definition" "api" {
       # KHAL_TENANT is the tenant-claim doublecheck; only the api needs it.
       { name = "KHAL_AUTH_URL", value = var.khal_auth_url },
       { name = "KHAL_TENANT", value = var.client_name },
+      # Comma-separated `aud` allowlist — Tracing AND Billing session
+      # tokens read this module's data (capability billing.ledger).
+      { name = "KHAL_TOKEN_AUDIENCE", value = var.khal_token_audience },
     ])
     secrets          = local.mongo_secrets
     logConfiguration = local.log_conf["api"]

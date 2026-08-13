@@ -51,6 +51,17 @@ const optionalNonEmptyString = z
   .transform((value) => value || undefined);
 
 /**
+ * Comma-separated list env — the same split/trim/drop-empties reading the
+ * CORS middleware applies to CORS_ALLOWED_ORIGINS, so `a, b` and `a,b`
+ * mean the same list everywhere.
+ */
+const splitCommaList = (value: string): string[] =>
+  value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+/**
  * Bounded numeric knob (the connector's audit F-4 guard, same rationale):
  * a knob typo'd to 0 or garbage must fail the boot loudly, not configure a
  * busy-loop or a midnight-sharp close nobody chose. The resolved values
@@ -100,8 +111,9 @@ const envSchema = z
     // API open, PoC posture (decision 133 style) — said loudly at boot.
     KHAL_AUTH_URL: optionalNonEmptyString,
     KHAL_TENANT: optionalNonEmptyString,
-    // Expected `aud` of the session JWT; defaults to `tracing` in the
-    // transform below.
+    // Accepted `aud` values of the session JWT, comma-separated — a token
+    // matching ANY entry passes (the Tracing AND Billing apps read this
+    // module's data). Defaults to `tracing,billing` in the transform below.
     KHAL_TOKEN_AUDIENCE: optionalNonEmptyString,
     // audit D-1: cross-origin is an explicit operator act — exact origins,
     // comma-separated; unset/empty = same-origin only (no CORS headers).
@@ -135,10 +147,27 @@ const envSchema = z
           'validation checks the `tenant` claim against it',
       });
     }
+
+    // A SET audience that parses to zero entries (only commas/blanks) is a
+    // typo, not a choice — refuse the boot instead of silently falling back
+    // to the default list (same fail-loud posture as the numeric knobs).
+    if (
+      env.KHAL_TOKEN_AUDIENCE &&
+      splitCommaList(env.KHAL_TOKEN_AUDIENCE).length === 0
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'KHAL_TOKEN_AUDIENCE must name at least one audience ' +
+          '(comma-separated list, e.g. "tracing,billing")',
+      });
+    }
   })
   .transform((env) => ({
     ...env,
-    KHAL_TOKEN_AUDIENCE: env.KHAL_TOKEN_AUDIENCE ?? 'tracing',
+    KHAL_TOKEN_AUDIENCE: env.KHAL_TOKEN_AUDIENCE
+      ? splitCommaList(env.KHAL_TOKEN_AUDIENCE)
+      : ['tracing', 'billing'],
     SERVER_PORT: parseInt(env.SERVER_PORT, 10),
     BILLING_AUTO_CLOSE_DELAY_MINUTES: env.BILLING_AUTO_CLOSE_DELAY_MINUTES
       ? parseInt(env.BILLING_AUTO_CLOSE_DELAY_MINUTES, 10)
@@ -202,7 +231,7 @@ export const environment: EnvironmentVariables = {
   // '' → undefined already guaranteed by optionalNonEmptyString above.
   khalAuthUrl: safeEnvironment.KHAL_AUTH_URL,
   khalTenant: safeEnvironment.KHAL_TENANT,
-  khalTokenAudience: safeEnvironment.KHAL_TOKEN_AUDIENCE,
+  khalTokenAudiences: safeEnvironment.KHAL_TOKEN_AUDIENCE,
   corsAllowedOrigins: safeEnvironment.CORS_ALLOWED_ORIGINS,
   billingAutoCloseDelayMinutes:
     safeEnvironment.BILLING_AUTO_CLOSE_DELAY_MINUTES,

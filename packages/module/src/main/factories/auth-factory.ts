@@ -46,7 +46,7 @@ export const makeAuthMiddleware = (): ((
   return buildAuthMiddleware(
     new SessionTokenAuthenticator({
       authUrl,
-      audience: config.khalTokenAudience,
+      audiences: config.khalTokenAudiences,
       tenant,
     }),
   );

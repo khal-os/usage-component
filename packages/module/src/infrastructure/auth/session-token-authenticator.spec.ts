@@ -9,7 +9,9 @@ import { SessionTokenAuthenticator } from './session-token-authenticator.js';
  * verification path, not a mock of it.
  */
 const AUTH_URL = 'https://auth.khal-usage.com';
-const AUDIENCE = 'tracing';
+// Multi-audience (comma-list KHAL_TOKEN_AUDIENCE): tokens for EITHER app
+// pass — Tracing and Billing read the same module data.
+const AUDIENCES = ['tracing', 'billing'];
 const TENANT = 'namastex';
 
 type KeyMaterial = {
@@ -57,7 +59,7 @@ const signToken = async (overrides?: {
   const jwt = new SignJWT({ tenant: overrides?.tenant ?? TENANT })
     .setProtectedHeader({ alg: 'RS256', kid: overrides?.kid ?? 'key-1' })
     .setIssuer(overrides?.issuer ?? AUTH_URL)
-    .setAudience(overrides?.audience ?? AUDIENCE)
+    .setAudience(overrides?.audience ?? 'tracing')
     .setIssuedAt();
 
   if (overrides?.expiresAt !== undefined) {
@@ -72,7 +74,7 @@ const signToken = async (overrides?: {
 const makeSut = () =>
   new SessionTokenAuthenticator({
     authUrl: AUTH_URL,
-    audience: AUDIENCE,
+    audiences: AUDIENCES,
     tenant: TENANT,
   });
 
@@ -105,12 +107,37 @@ describe('SessionTokenAuthenticator', () => {
     await expect(makeSut().isAuthenticated(token)).resolves.toBe(false);
   });
 
-  it('MUST refuse a wrong `aud`', async () => {
+  it('MUST accept `aud=billing` — the second configured audience (Billing app)', async () => {
     serveJwks(jwksOf(keys.publicJwk));
 
     const token = await signToken({ audience: 'billing' });
 
+    await expect(makeSut().isAuthenticated(token)).resolves.toBe(true);
+  });
+
+  it('MUST refuse an `aud` outside the configured list', async () => {
+    serveJwks(jwksOf(keys.publicJwk));
+
+    const token = await signToken({ audience: 'metrics' });
+
     await expect(makeSut().isAuthenticated(token)).resolves.toBe(false);
+  });
+
+  it('MUST still enforce the list when it has a single entry (backward compat)', async () => {
+    serveJwks(jwksOf(keys.publicJwk));
+
+    const sut = new SessionTokenAuthenticator({
+      authUrl: AUTH_URL,
+      audiences: ['tracing'],
+      tenant: TENANT,
+    });
+
+    await expect(
+      sut.isAuthenticated(await signToken({ audience: 'tracing' })),
+    ).resolves.toBe(true);
+    await expect(
+      sut.isAuthenticated(await signToken({ audience: 'billing' })),
+    ).resolves.toBe(false);
   });
 
   it('MUST refuse a wrong `tenant` claim (physical isolation doublecheck)', async () => {

@@ -133,8 +133,9 @@ permanent archive — run it before any `down -v`).
 Auth (added post-PoC): env-gated SESSION auth on `/api/v1` — with
 `KHAL_AUTH_URL` set, every request needs a khal-auth session JWT, verified
 locally against the JWKS at `${KHAL_AUTH_URL}/.well-known/jwks.json`
-(RS256; `iss` == the URL, `aud` == `KHAL_TOKEN_AUDIENCE`, default
-`tracing`; `tenant` claim == `KHAL_TENANT`, required with the URL; `exp`
+(RS256; `iss` == the URL, `aud` matching ANY entry of the comma-separated
+`KHAL_TOKEN_AUDIENCE`, default `tracing,billing`; `tenant` claim ==
+`KHAL_TENANT`, required with the URL; `exp`
 checked) — except `/api/v1/docs*` and `openapi.json`, which stay open as
 the container healthcheck and integration surface (decision 103; OPTIONS
 preflight also bypasses). Identity-only, no scopes (ADR-95) — the module

@@ -14,15 +14,19 @@ export interface ServerEnvironmentVariables {
    * The khal-auth base URL (ADR-103 spelling). Setting it turns session
    * auth ON for /api/v1 — every request must carry a Bearer session JWT
    * verified locally: RS256 against {url}/.well-known/jwks.json, iss ==
-   * this URL, aud == khalTokenAudience, `tenant` claim == khalTenant, exp
+   * this URL, aud ∈ khalTokenAudiences, `tenant` claim == khalTenant, exp
    * in the future. Identity-only — no scopes. Unset → API open (PoC
    * posture, loud warn at boot).
    */
   khalAuthUrl?: string;
   /** The tenant this deployment serves — matched against the JWT's `tenant` claim. */
   khalTenant?: string;
-  /** Expected `aud` of the session JWT (default `tracing`). */
-  khalTokenAudience: string;
+  /**
+   * Accepted `aud` values of the session JWT — a token matching ANY entry
+   * passes. Parsed from comma-separated KHAL_TOKEN_AUDIENCE (default
+   * `tracing,billing`: both apps read this module's data).
+   */
+  khalTokenAudiences: string[];
   /** audit D-1: exact origins allowed cross-origin (comma-separated); unset = same-origin only. */
   corsAllowedOrigins?: string;
 }

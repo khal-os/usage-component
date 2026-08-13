@@ -68,20 +68,28 @@ describe('environment-setup', () => {
       expect(environment.khalTenant).toBe('acme');
     });
 
-    it("MUST default KHAL_TOKEN_AUDIENCE to 'tracing' (unset AND '')", async () => {
+    it("MUST default KHAL_TOKEN_AUDIENCE to ['tracing', 'billing'] (unset AND '')", async () => {
       const unset = await loadEnvironment();
-      expect(unset.khalTokenAudience).toBe('tracing');
+      expect(unset.khalTokenAudiences).toEqual(['tracing', 'billing']);
 
       const empty = await loadEnvironment({ KHAL_TOKEN_AUDIENCE: '' });
-      expect(empty.khalTokenAudience).toBe('tracing');
+      expect(empty.khalTokenAudiences).toEqual(['tracing', 'billing']);
     });
 
-    it('MUST pass an explicit KHAL_TOKEN_AUDIENCE through', async () => {
+    it('MUST parse a single explicit KHAL_TOKEN_AUDIENCE as a one-entry list (backward compat)', async () => {
       const environment = await loadEnvironment({
         KHAL_TOKEN_AUDIENCE: 'billing',
       });
 
-      expect(environment.khalTokenAudience).toBe('billing');
+      expect(environment.khalTokenAudiences).toEqual(['billing']);
+    });
+
+    it('MUST split KHAL_TOKEN_AUDIENCE on commas, trimming spaces and dropping empties', async () => {
+      const environment = await loadEnvironment({
+        KHAL_TOKEN_AUDIENCE: ' tracing , billing ,',
+      });
+
+      expect(environment.khalTokenAudiences).toEqual(['tracing', 'billing']);
     });
 
     it("MUST treat '' (compose `${VAR:-}` defaults) as unset", async () => {

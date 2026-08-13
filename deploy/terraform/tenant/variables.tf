@@ -116,6 +116,16 @@ variable "khal_auth_url" {
   default     = ""
 }
 
+variable "khal_token_audience" {
+  description = <<-EOT
+    Accepted `aud` claims of the session JWT, comma-separated — a token
+    matching ANY entry passes. Tracing AND Billing session tokens both read
+    this module's data (capability billing.ledger), hence the two defaults.
+  EOT
+  type        = string
+  default     = "tracing,billing"
+}
+
 variable "cors_allowed_origins" {
   description = "Exact origins, comma-separated; empty = same-origin only (audit D-1)."
   type        = string
