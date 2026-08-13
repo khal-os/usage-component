@@ -32,8 +32,7 @@ tenant, nothing defaults).
    terraform apply -var-file=tenants/<client>.tfvars
    ```
 3. **Fill the tenant secrets** (ADR-103: one JSON per family, keys == env var
-   names; values never touch git/state). Migrating an existing client instead?
-   Run `CLIENT=<client> ./deploy/scripts/migrate-adr103.sh` and skip this step.
+   names; values never touch git/state).
    ```bash
    aws secretsmanager put-secret-value --secret-id khal/<client>/production/usage/mongo --secret-string '{
      "MONGO_DB_HOST": "<cluster>.mongodb.net",

@@ -74,13 +74,8 @@ resource "aws_iam_role_policy_attachment" "langwatch_ssm" {
 
 data "aws_iam_policy_document" "langwatch_boot" {
   statement {
-    actions = ["secretsmanager:GetSecretValue"]
-    # Canonical langwatch family secret + legacy JSON (until step B — a
-    # running instance keeps its old tenant.conf until re-provisioned).
-    resources = [
-      aws_secretsmanager_secret.usage["langwatch"].arn,
-      aws_secretsmanager_secret.tenant.arn,
-    ]
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.usage["langwatch"].arn]
   }
 
   statement {
