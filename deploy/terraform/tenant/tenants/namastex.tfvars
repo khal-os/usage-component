@@ -10,7 +10,7 @@ client_name         = "namastex"
 client_timezone     = "America/Sao_Paulo"
 mongo_usage_db_name = "usage_db"
 
-image_sha = "a4d76c89c6a4218015dde6785506e1596e49fcd6"
+image_sha = "7865e9f47345db42ef58383c6a0796ec8af4713b"
 
 # Decision 141: interim Basic gate until the KHAL quartet has real infra.
 enable_basic_auth = true
