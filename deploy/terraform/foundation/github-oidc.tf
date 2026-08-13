@@ -64,7 +64,11 @@ data "aws_iam_policy_document" "ecr_push" {
       "ecr:BatchGetImage",
       "ecr:GetDownloadUrlForLayer",
     ]
-    resources = [for r in aws_ecr_repository.images : r.arn]
+    # Canonical four-axis repos (ADR-103) + legacy until step B.
+    resources = concat(
+      [for r in aws_ecr_repository.images_v2 : r.arn],
+      [for r in aws_ecr_repository.images : r.arn],
+    )
   }
 }
 
