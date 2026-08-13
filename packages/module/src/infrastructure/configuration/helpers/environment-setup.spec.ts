@@ -7,7 +7,7 @@
  * - MONGO_DB_ATLAS arrives as a STRING ('true'/'false') and must map to a
  *   real boolean — z.boolean() would reject every set value and crash the
  *   boot (the Atlas branch was dead code).
- * - Compose forwards the KHAL_* quartet with `${VAR:-}` defaults, so an env
+ * - Compose forwards the KHAL_* vars with `${VAR:-}` defaults, so an env
  *   file that omits them delivers EMPTY STRINGS to the container — which must
  *   behave exactly like unset (an empty URL must never half-enable auth).
  */
@@ -22,10 +22,9 @@ const loadEnvironment = async (
     SERVER_PORT: '3000',
   };
   delete process.env.MONGO_DB_ATLAS;
-  delete process.env.KHAL_DISCOVERY_URL;
+  delete process.env.KHAL_AUTH_URL;
   delete process.env.KHAL_TENANT;
-  delete process.env.KHAL_CLIENT_ID;
-  delete process.env.KHAL_CLIENT_SECRET;
+  delete process.env.KHAL_TOKEN_AUDIENCE;
   Object.assign(process.env, overrides);
 
   jest.resetModules();
@@ -58,33 +57,41 @@ describe('environment-setup', () => {
     });
   });
 
-  describe('KHAL_* (canonical khal consumer surface, ADR-97)', () => {
-    it('MUST pass the quartet through unchanged', async () => {
+  describe('KHAL_* (session auth surface, ADR-103 naming)', () => {
+    it('MUST pass KHAL_AUTH_URL + KHAL_TENANT through unchanged', async () => {
       const environment = await loadEnvironment({
-        KHAL_DISCOVERY_URL: 'http://connectors:7103',
+        KHAL_AUTH_URL: 'https://auth.khal-usage.com',
         KHAL_TENANT: 'acme',
-        KHAL_CLIENT_ID: 'observability-module',
-        KHAL_CLIENT_SECRET: 's3cret',
       });
 
-      expect(environment.khalDiscoveryUrl).toBe('http://connectors:7103');
+      expect(environment.khalAuthUrl).toBe('https://auth.khal-usage.com');
       expect(environment.khalTenant).toBe('acme');
-      expect(environment.khalClientId).toBe('observability-module');
-      expect(environment.khalClientSecret).toBe('s3cret');
     });
 
-    it("MUST treat '' (compose `${VAR:-}` defaults) as unset across the quartet", async () => {
+    it("MUST default KHAL_TOKEN_AUDIENCE to 'tracing' (unset AND '')", async () => {
+      const unset = await loadEnvironment();
+      expect(unset.khalTokenAudience).toBe('tracing');
+
+      const empty = await loadEnvironment({ KHAL_TOKEN_AUDIENCE: '' });
+      expect(empty.khalTokenAudience).toBe('tracing');
+    });
+
+    it('MUST pass an explicit KHAL_TOKEN_AUDIENCE through', async () => {
       const environment = await loadEnvironment({
-        KHAL_DISCOVERY_URL: '',
-        KHAL_TENANT: '',
-        KHAL_CLIENT_ID: '',
-        KHAL_CLIENT_SECRET: '',
+        KHAL_TOKEN_AUDIENCE: 'billing',
       });
 
-      expect(environment.khalDiscoveryUrl).toBeUndefined();
+      expect(environment.khalTokenAudience).toBe('billing');
+    });
+
+    it("MUST treat '' (compose `${VAR:-}` defaults) as unset", async () => {
+      const environment = await loadEnvironment({
+        KHAL_AUTH_URL: '',
+        KHAL_TENANT: '',
+      });
+
+      expect(environment.khalAuthUrl).toBeUndefined();
       expect(environment.khalTenant).toBeUndefined();
-      expect(environment.khalClientId).toBeUndefined();
-      expect(environment.khalClientSecret).toBeUndefined();
     });
   });
 });

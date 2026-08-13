@@ -21,10 +21,10 @@
 #
 # Token precedence:
 #   1. TOKEN                     — explicit token, used as-is
-#   2. KHAL_CLIENT_ID/SECRET     — with AUTH_SYSTEM_URL: a session is requested
-#                                  from the M2M Auth System (client_credentials;
-#                                  sessions expire — each run requests a fresh
-#                                  one, there is no renew)
+#   2. KHAL_CLIENT_ID/SECRET     — with KHAL_AUTH_SYSTEM_URL: a session is
+#                                  requested from the M2M Auth System
+#                                  (client_credentials; sessions expire — each
+#                                  run requests a fresh one, there is no renew)
 #   3. dev claims token          — minted below (base64url JSON, no scopes)
 #
 # The local catalog stores manifests IN MEMORY — run this again after every
@@ -35,14 +35,11 @@
 #   CLIENT        REQUIRED — client slug; tenant AND source of API_PORT
 #                 (read from clients/$CLIENT.env unless API_PORT is set;
 #                 absent there, the compose default applies — see host_port)
-#   KHAL_DISCOVERY_URL the silo's discovery base (ADR-97) — resolves
-#                 MODULE_CATALOG_URL and AUTH_SYSTEM_URL from /.well-known/registers
-#                 (explicitly set vars win over resolved ones)
 #   KHAL_TENANT   tenant slug (default: $CLIENT)
-#   MODULE_CATALOG_URL  default http://127.0.0.1:7102 (the Module Catalog)
+#   KHAL_MODULE_CATALOG_URL  default http://127.0.0.1:7102 (the Module Catalog)
 #   MODULE_ID     default tracing
 #   ENDPOINT      default http://localhost:${API_PORT}
-#   AUTH_SYSTEM_URL    the M2M Auth System base URL (enables the session path)
+#   KHAL_AUTH_SYSTEM_URL  the M2M Auth System base URL (enables the session path)
 #   KHAL_CLIENT_ID     the module's M2M credential id
 #   KHAL_CLIENT_SECRET the module's M2M credential secret
 #   TOKEN         explicit token for the PUT (wins over everything)
@@ -54,20 +51,12 @@ set -euo pipefail
 
 : "${CLIENT:?export CLIENT first (client slug = tenant)}"
 MODULE_ID="${MODULE_ID:-tracing}"
-# Canonical khal spellings only (decision 133 — legacy names removed pre-prod).
+# Canonical khal spellings only (ADR-103 URL family — discovery is gone,
+# the explicit catalog/auth URLs are the only inputs).
 TENANT="${KHAL_TENANT:-$CLIENT}"
 KHAL_CLIENT_ID="${KHAL_CLIENT_ID:-}"
 KHAL_CLIENT_SECRET="${KHAL_CLIENT_SECRET:-}"
-# ADR-97: one discovery URL resolves catalog + auth. Explicit vars win.
-MODULE_CATALOG_URL="${MODULE_CATALOG_URL:-}"
-if [[ -n "${KHAL_DISCOVERY_URL:-}" ]]; then
-  discovery_json=$(curl -sS "${KHAL_DISCOVERY_URL%/}/.well-known/registers?tenant=${TENANT}")
-  [[ -z "$MODULE_CATALOG_URL" ]] && MODULE_CATALOG_URL=$(python3 -c \
-    "import json,sys;print(json.loads(sys.argv[1])['registers']['modules'])" "$discovery_json")
-  [[ -z "${AUTH_SYSTEM_URL:-}" ]] && AUTH_SYSTEM_URL=$(python3 -c \
-    "import json,sys;print(json.loads(sys.argv[1])['registers']['auth']['url'])" "$discovery_json")
-fi
-MODULE_CATALOG_URL="${MODULE_CATALOG_URL:-http://127.0.0.1:7102}"
+KHAL_MODULE_CATALOG_URL="${KHAL_MODULE_CATALOG_URL:-http://127.0.0.1:7102}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/deploy-lib.sh
@@ -95,7 +84,7 @@ VERSION=$(node -p "require('$ROOT/package.json').version")
 # Session from the M2M Auth System (the target platform flow): credentials in,
 # short-lived session out. No scopes are requested — identity only.
 m2m_session() {
-  curl -sS -X POST "${AUTH_SYSTEM_URL%/}/oauth/token" \
+  curl -sS -X POST "${KHAL_AUTH_SYSTEM_URL%/}/oauth/token" \
     -H 'content-type: application/x-www-form-urlencoded' \
     --data-urlencode 'grant_type=client_credentials' \
     --data-urlencode "client_id=${KHAL_CLIENT_ID}" \
@@ -113,9 +102,9 @@ print(base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
 }
 
 if [[ -z "${TOKEN:-}" ]]; then
-  if [[ -n "${AUTH_SYSTEM_URL:-}" && -n "${KHAL_CLIENT_ID:-}" && -n "${KHAL_CLIENT_SECRET:-}" ]]; then
+  if [[ -n "${KHAL_AUTH_SYSTEM_URL:-}" && -n "${KHAL_CLIENT_ID:-}" && -n "${KHAL_CLIENT_SECRET:-}" ]]; then
     TOKEN="$(m2m_session)"
-    echo "session obtained from the M2M Auth System (${AUTH_SYSTEM_URL})"
+    echo "session obtained from the M2M Auth System (${KHAL_AUTH_SYSTEM_URL})"
   else
     TOKEN="$(dev_token)"
   fi
@@ -172,9 +161,9 @@ attempt() {
   local etag
   etag=$(curl -s -o /dev/null -w '%{header_json}' \
     -H "Authorization: Bearer ${token}" \
-    "${MODULE_CATALOG_URL}/modules/${MODULE_ID}" \
+    "${KHAL_MODULE_CATALOG_URL}/modules/${MODULE_ID}" \
     | python3 -c "import json,sys;h=json.load(sys.stdin);print((h.get('etag') or [''])[0])")
-  local args=(-sS -X PUT "${MODULE_CATALOG_URL}/modules/${MODULE_ID}"
+  local args=(-sS -X PUT "${KHAL_MODULE_CATALOG_URL}/modules/${MODULE_ID}"
     -H "Authorization: Bearer ${token}" -H 'content-type: application/json'
     -o "$BODY_FILE" -w '%{http_code}' -d "${MANIFEST}")
   [[ -n "$etag" ]] && args+=(-H "If-Match: ${etag}")
@@ -186,12 +175,12 @@ attempt "$TOKEN"
 cat "$BODY_FILE"; echo
 echo "HTTP ${CODE}"
 [[ "$CODE" =~ ^2 ]] || { echo "ERROR: registration failed"; exit 1; }
-echo "module '${MODULE_ID}' v${VERSION} registered at ${MODULE_CATALOG_URL} (tenant ${TENANT}) → ${ENDPOINT}"
+echo "module '${MODULE_ID}' v${VERSION} registered at ${KHAL_MODULE_CATALOG_URL} (tenant ${TENANT}) → ${ENDPOINT}"
 
 # Fluxo Deploy, passo final: o manifesto nasce desativado — sem esta ativação
 # o module não entra em lista/resolução (Farol não o descobre).
 if [[ -z "${SKIP_ACTIVATE:-}" ]]; then
-  ACT=$(curl -sS -X POST "${MODULE_CATALOG_URL}/modules/${MODULE_ID}/activate" \
+  ACT=$(curl -sS -X POST "${KHAL_MODULE_CATALOG_URL}/modules/${MODULE_ID}/activate" \
     -H "Authorization: Bearer ${TOKEN}" -o "$BODY_FILE" -w '%{http_code}')
   [[ "$ACT" =~ ^2 ]] \
     || { cat "$BODY_FILE"; echo; echo "ERROR: activation failed (HTTP ${ACT})"; exit 1; }

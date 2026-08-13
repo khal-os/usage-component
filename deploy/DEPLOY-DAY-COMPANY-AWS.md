@@ -138,15 +138,13 @@ aws secretsmanager put-secret-value --secret-id usage/namastex --secret-string '
   "MONGO_DB_PASSWORD": "<from the VM env — step 0>",
   "LANGWATCH_NEXTAUTH_SECRET": "'"$(openssl rand -base64 32)"'",
   "LANGWATCH_API_TOKEN_JWT_SECRET": "'"$(openssl rand -base64 32)"'",
-  "LANGWATCH_CREDENTIALS_SECRET": "'"$(openssl rand -base64 32)"'",
-  "BASIC_AUTH_USER": "namastex",
-  "BASIC_AUTH_PASSWORD": "'"$(openssl rand -base64 24)"'"
+  "LANGWATCH_CREDENTIALS_SECRET": "'"$(openssl rand -base64 32)"'"
 }'
 ```
 
-- ⚠ Save the BASIC_AUTH pair somewhere humans can find it (it's what the
-  presentation audience/dashboards will type). Read it back anytime:
-  `aws secretsmanager get-secret-value --secret-id usage/namastex --query SecretString --output text | jq`
+- API auth is session-JWT now (khal-auth via `khal_auth_url` in tfvars) —
+  no auth keys in the secret. (The deploy-day BASIC_AUTH pair was retired
+  with decision 141; the old basic-auth secret is deletable.)
 - ⚠ LANGWATCH_CREDENTIALS_SECRET must NEVER change after LangWatch's first boot.
 - The EC2 self-heals: `langwatch-bootstrap.service` retries every 30s until
   the secret exists, then brings the stack up — no reboot, no action.
@@ -248,10 +246,8 @@ when the gate runs.
 | `LANGWATCH_NEXTAUTH_SECRET` | generate: `openssl rand -base64 32` | fresh — new LangWatch |
 | `LANGWATCH_API_TOKEN_JWT_SECRET` | generate: `openssl rand -base64 32` | fresh |
 | `LANGWATCH_CREDENTIALS_SECRET` | generate ONCE: `openssl rand -base64 32` | ⚠ NEVER change after LangWatch's first boot |
-| `BASIC_AUTH_USER` | choose (e.g. `namastex`) | what dashboard users type |
-| `BASIC_AUTH_PASSWORD` | generate: `openssl rand -base64 24` | ⚠ save where humans find it — it's the presentation login |
 
-Who reads this secret: the api task (mongo + basic-auth keys), connector/
+Who reads this secret: the api task (mongo keys), connector/
 scheduler/backup tasks (mongo keys), and the LangWatch EC2's bootstrap
 service (LW_ keys → regenerated `/opt/langwatch/.env` on every service
 start). After EDITING the secret: `systemctl restart langwatch-bootstrap`
@@ -275,8 +271,8 @@ tasks read it at start only.
 
 | Where set | Vars |
 |---|---|
-| tfvars → task definitions | `CLIENT_NAME` `CLIENT_TIMEZONE` `MONGO_USAGE_DB_NAME` `MONGO_DB_ATLAS=true` `SERVER_PORT` `CORS_ALLOWED_ORIGINS` `TRACE_INGESTION_*` `BILLING_AUTO_CLOSE_*` |
+| tfvars → task definitions | `CLIENT_NAME` `CLIENT_TIMEZONE` `MONGO_USAGE_DB_NAME` `MONGO_DB_ATLAS=true` `SERVER_PORT` `CORS_ALLOWED_ORIGINS` `KHAL_AUTH_URL` `KHAL_TENANT` `TRACE_INGESTION_*` `BILLING_AUTO_CLOSE_*` |
 | terraform (from EC2/foundation refs) | `LANGWATCH_CLICKHOUSE_URL/USER/PASSWORD/DATABASE` (stack-internal `default`/`langwatch`) |
 | tfvars → EC2 user-data → compose env | `LANGWATCH_PUBLIC_URL` + the five capacity knobs (`LANGWATCH_WORKERS_REPLICAS`, `LANGWATCH_MEMORY_LIMIT`, `LANGWATCH_REDIS_MEMORY_LIMIT`, `LANGWATCH_CLICKHOUSE_MEMORY_LIMIT`, `LANGWATCH_CLICKHOUSE_CPU_LIMIT`) |
 | defaults in code | `LOG_LEVEL` (info) `LOG_FORMAT` (json) |
-| LATER, not deploy day | `KHAL_DISCOVERY_URL` `KHAL_TENANT` `KHAL_CLIENT_ID` `KHAL_CLIENT_SECRET` — when the khal platform has real infra; setting them means DELETING the BASIC_AUTH pair (decision 141, boot refuses both) |
+| session auth | `khal_auth_url` in `tenants/namastex.tfvars` → `KHAL_AUTH_URL` + `KHAL_TENANT` in the api task; empty = API open (PoC). The interim BASIC_AUTH pair (decision 141) is retired |

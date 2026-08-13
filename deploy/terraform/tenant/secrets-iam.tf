@@ -1,6 +1,6 @@
 # Tenant secrets (the [SECRET→SM] contract from clients/example.production.env).
 # ADR-103: one JSON secret per FAMILY at khal/<client>/<env>/usage/{mongo,
-# langwatch,basic-auth}, keys == env var names. Terraform creates the SHELLS;
+# langwatch}, keys == env var names. Terraform creates the SHELLS;
 # VALUES are set by the operator (RUNBOOK-AWS.md §onboarding) or by
 # deploy/scripts/migrate-adr103.sh (which splits the legacy usage/<client>
 # JSON, renaming LW_* keys to LANGWATCH_*) and never transit state or git:
@@ -13,7 +13,10 @@
 # migrate-adr103.sh script (which splits the legacy JSON and renames the
 # LW_* keys to LANGWATCH_*) — never through state or git.
 resource "aws_secretsmanager_secret" "usage" {
-  for_each = toset(["mongo", "langwatch", "basic-auth"])
+  # basic-auth left this set with the session-auth switch (decision 141
+  # retired): the khal/<client>/<env>/usage/basic-auth secret is no longer
+  # read by anything and can be deleted by the operator.
+  for_each = toset(["mongo", "langwatch"])
 
   name = "${local.sm_base}/${each.key}"
 }

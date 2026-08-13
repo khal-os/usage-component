@@ -1,7 +1,7 @@
 {
  "info": {
   "name": "Módulo de Observabilidade — API",
-  "description": "Uma API, três faces: Billing (quanto custou), Traces (as execuções reais) e Sessions (as conversas).\n\nTodos os valores client-facing são em R$; custos vêm do carimbo de preço aplicado na ingestão (imutável). Traces sem preço aplicável aparecem como `pending_price` — nunca R$ 0,00.\n\n**Convenções de query**\n- Datas/período: ISO 8601 em UTC, janelas half-open `[from, to)`.\n- Filtros multi-valor (decisão 76): repita o parâmetro para OR — `?agent=a&agent=b`. OR dentro do campo, AND entre campos.\n- Paginação: `page` (1-based) e `page_size` (máx. 100), server-side, mais recente primeiro.\n\nAjuste a variável `baseUrl` para o deployment desejado (padrão: stack local do cliente em `http://localhost:3001`).\n\n**Auth (M2M, condicionada por ambiente)**: a coleção envia `Authorization: Bearer {{token}}` em toda request. O token só é necessário quando o deployment configura `KHAL_DISCOVERY_URL` — sem essa variável a API responde aberta (comportamento PoC) e o header vazio é ignorado. As rotas de docs permanecem abertas mesmo com auth ativa.",
+  "description": "Uma API, três faces: Billing (quanto custou), Traces (as execuções reais) e Sessions (as conversas).\n\nTodos os valores client-facing são em R$; custos vêm do carimbo de preço aplicado na ingestão (imutável). Traces sem preço aplicável aparecem como `pending_price` — nunca R$ 0,00.\n\n**Convenções de query**\n- Datas/período: ISO 8601 em UTC, janelas half-open `[from, to)`.\n- Filtros multi-valor (decisão 76): repita o parâmetro para OR — `?agent=a&agent=b`. OR dentro do campo, AND entre campos.\n- Paginação: `page` (1-based) e `page_size` (máx. 100), server-side, mais recente primeiro.\n\nAjuste a variável `baseUrl` para o deployment desejado (padrão: stack local do cliente em `http://localhost:3001`).\n\n**Auth (sessão, condicionada por ambiente)**: a coleção envia `Authorization: Bearer {{token}}` em toda request. O token (JWT de sessão do khal-auth) só é necessário quando o deployment configura `KHAL_AUTH_URL` — sem essa variável a API responde aberta (comportamento PoC) e o header vazio é ignorado. As rotas de docs permanecem abertas mesmo com auth ativa.",
   "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
  },
  "auth": {
@@ -44,7 +44,7 @@
    "key": "token",
    "value": "",
    "type": "string",
-   "description": "Bearer token M2M aceito pelo khal Auth System. Necessário APENAS quando KHAL_DISCOVERY_URL está configurada no deployment; caso contrário deixe vazio."
+   "description": "JWT de sessão emitido pelo khal-auth. Necessário APENAS quando KHAL_AUTH_URL está configurada no deployment; caso contrário deixe vazio."
   }
  ],
  "item": [

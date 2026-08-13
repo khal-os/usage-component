@@ -3,11 +3,10 @@ import { TokenAuthenticator } from '../../../application/interfaces/token-authen
 import { UnauthorizedError } from '../../../presentation/errors/index.js';
 
 /**
- * Env-gated bearer auth. Built WITHOUT an authenticator (no khal platform
- * configured — KHAL_DISCOVERY_URL unset) it is a passthrough — the API
- * stays open, PoC behavior. Built WITH
+ * Env-gated bearer auth. Built WITHOUT an authenticator (KHAL_AUTH_URL
+ * unset) it is a passthrough — the API stays open, PoC behavior. Built WITH
  * one, every request must carry `Authorization: Bearer <token>` that the
- * Auth System accepts (authenticated-or-not only).
+ * authenticator accepts (authenticated-or-not only).
  *
  * Failures answer 401 directly — never next(err): the error boundary
  * flattens middleware 4xx into 400 InvalidParamError('body').

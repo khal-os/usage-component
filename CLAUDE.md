@@ -130,19 +130,18 @@ until the next close adjudicates them (decision 100); reprocess skips closed
 months. Runbook vocabulary also includes `make backup` (mongodump of the
 permanent archive — run it before any `down -v`).
 
-Auth (added post-PoC): env-gated M2M bearer auth on `/api/v1` — with the
-khal platform configured, every request needs a token the khal Auth System
-accepts (introspection, authenticated-or-not ONLY), except `/api/v1/docs*`
-and `openapi.json`, which stay open as the container healthcheck and
-integration surface (decision 103; OPTIONS preflight also bypasses). The
-canonical config is the khal-wide quartet (decision 132):
-`KHAL_DISCOVERY_URL` + `KHAL_TENANT` (the Auth System URL is resolved at
-runtime from `/.well-known/registers` — fail closed when unresolved) +
-`KHAL_CLIENT_ID`/`KHAL_CLIENT_SECRET` (the module's own credential for the
-protected `/introspect`). The quartet is the ONLY spelling — the
-pre-discovery `AUTH_SYSTEM_*` names were removed pre-prod (decision 133).
-The module holds no scope/tenant logic — that is a platform invariant, not
-an omission. Nothing configured → API open (PoC behavior).
+Auth (added post-PoC): env-gated SESSION auth on `/api/v1` — with
+`KHAL_AUTH_URL` set, every request needs a khal-auth session JWT, verified
+locally against the JWKS at `${KHAL_AUTH_URL}/.well-known/jwks.json`
+(RS256; `iss` == the URL, `aud` == `KHAL_TOKEN_AUDIENCE`, default
+`tracing`; `tenant` claim == `KHAL_TENANT`, required with the URL; `exp`
+checked) — except `/api/v1/docs*` and `openapi.json`, which stay open as
+the container healthcheck and integration surface (decision 103; OPTIONS
+preflight also bypasses). Identity-only, no scopes (ADR-95) — the module
+holds no scope logic, a platform invariant, not an omission. The retired
+names (the discovery quartet, the interim `BASIC_AUTH_*` gate of decision
+141) have NO aliases. Nothing configured → API open (PoC behavior, loud
+warn at boot).
 
 ## Working agreements
 

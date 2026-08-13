@@ -59,29 +59,26 @@ services:
       # mongodb+srv://<host> with TLS; MONGO_DB_PORT is ignored and the
       # Makefile drops compose.mongodb.yml from the chain.
       MONGO_DB_ATLAS: ${MONGO_DB_ATLAS:-}
-      # khal platform (M2M auth) — forwarded from the client env, or the API
-      # stays open (PoC behavior). Canonical surface (ADR-97): discovery +
-      # tenant resolve the Auth System URL at runtime; the credential
-      # authenticates /introspect. The `:-` default interpolates to EMPTY
-      # when the env file omits/comments the var; environment-setup.ts treats
-      # '' as unset, so an empty forward can never half-enable auth.
-      KHAL_DISCOVERY_URL: ${KHAL_DISCOVERY_URL:-}
+      # khal session auth — forwarded from the client env, or the API stays
+      # open (PoC behavior). KHAL_AUTH_URL turns the gate on: /api/v1
+      # requests must carry a khal-auth session JWT, verified against the
+      # JWKS at ${KHAL_AUTH_URL}/.well-known/jwks.json; KHAL_TENANT is then
+      # required (the `tenant` claim doublecheck). The `:-` default
+      # interpolates to EMPTY when the env file omits/comments the var;
+      # environment-setup.ts treats '' as unset, so an empty forward can
+      # never half-enable auth.
+      KHAL_AUTH_URL: ${KHAL_AUTH_URL:-}
       KHAL_TENANT: ${KHAL_TENANT:-}
-      KHAL_CLIENT_ID: ${KHAL_CLIENT_ID:-}
-      KHAL_CLIENT_SECRET: ${KHAL_CLIENT_SECRET:-}
+      KHAL_TOKEN_AUDIENCE: ${KHAL_TOKEN_AUDIENCE:-}
       # audit D-1: cross-origin is opt-in — exact origins, comma-separated;
       # empty = same-origin only (no CORS headers at all).
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
-      # Decision 141: interim edge gate — both or neither (the env schema
-      # refuses half a pair, and refuses coexistence with KHAL_*).
-      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-}
-      BASIC_AUTH_PASSWORD: ${BASIC_AUTH_PASSWORD:-}
       # Logging knobs (one shared reader in core, both images): empty means
       # the defaults — level info, json lines on stdout.
       LOG_LEVEL: ${LOG_LEVEL:-}
       LOG_FORMAT: ${LOG_FORMAT:-}
     ports:
-      # Loopback by default: the API is auth-less until KHAL_DISCOVERY_URL
+      # Loopback by default: the API is auth-less until KHAL_AUTH_URL
       # is set, and it serves the full unmasked archive. Exposing beyond
       # localhost is an explicit opt-in — API_BIND=0.0.0.0 + a firewall
       # (see clients/example.env).
