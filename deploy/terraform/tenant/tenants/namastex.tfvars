@@ -10,14 +10,19 @@ client_name         = "namastex"
 client_timezone     = "America/Sao_Paulo"
 mongo_usage_db_name = "usage_db"
 
-image_sha = "3cba43da27c4af6d52b3f20bab8eb4ebb4c6890e"
+# Pinned at the multi-audience module (#33) — the Billing app's session
+# tokens carry aud=billing and only this image accepts a list.
+image_sha = "c3e7c3aeeabac4378189c46811387f6d1a6f8561"
 
 # Session auth (replaced the interim Basic gate of decision 141): /api/v1
 # requires a khal-auth session JWT issued by this khal-auth.
 khal_auth_url = "https://auth.khal-usage.com"
 
-# audit D-1: the Tracing app origin (CloudFront) + the desktop shell.
-cors_allowed_origins = "https://dtxfram9qv3pw.cloudfront.net,https://desktop.khal-usage.com"
+# Both browser readers of this module's data: Tracing (capability
+# tracing.sessions) and Billing (capability billing.ledger). The default
+# of var.khal_token_audience already lists the two audiences.
+# audit D-1: exact app origins (CloudFront) + the desktop shell.
+cors_allowed_origins = "https://dtxfram9qv3pw.cloudfront.net,https://d1wk8ax9c2hb4n.cloudfront.net,https://desktop.khal-usage.com"
 
 # COST-FLOOR sizing (user decision 2026-08-10: cheapest now, load-test
 # gate DEFERRED — upsize these + rerun the 1000/s gate before any real
