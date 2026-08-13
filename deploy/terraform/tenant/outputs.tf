@@ -16,11 +16,6 @@ output "clickhouse_private_url" {
   value = "http://${aws_route53_record.clickhouse.name}:8123"
 }
 
-output "tenant_secret_arn" {
-  description = "Fill via `aws secretsmanager put-secret-value` (RUNBOOK-AWS.md)."
-  value       = aws_secretsmanager_secret.tenant.arn
-}
-
 output "usage_secret_arns" {
   description = "Canonical family secrets (ADR-103): khal/<client>/<env>/usage/{mongo,langwatch,basic-auth}."
   value       = { for k, s in aws_secretsmanager_secret.usage : k => s.arn }

@@ -19,10 +19,6 @@ output "ecr_repository_urls_v2" {
   value       = { for k, r in aws_ecr_repository.images_v2 : k => r.repository_url }
 }
 
-output "ecr_repository_urls" {
-  value = { for k, r in aws_ecr_repository.images : k => r.repository_url }
-}
-
 output "route53_zone_id" {
   value = aws_route53_zone.main.zone_id
 }
