@@ -20,6 +20,10 @@
 #     (sign-in 200, cookie dropped — incident 2026-08-11). Partitioned
 #     cookies are exempt; the session is scoped per embedding site, and
 #     top-level visits are unaffected.
+#   - Agent vhost as an ALLOWLIST: the anatomy projections must be public
+#     for the platform app to read them, but AgentOS's run endpoints must
+#     not be. Two paths pass, everything else 403s, and the agent's Bearer
+#     is injected at the proxy so the browser never holds it.
 #
 # DEPLOY STATE RULE: /etc/caddy/Caddyfile on the VM is written from THIS
 # file. No module/agent redeploy may touch /etc/caddy — and any manual
@@ -69,4 +73,54 @@ langwatch.87-99-156-174.sslip.io {
 # WhatsApp chat UI (proxies the agent internally; agent stays unpublished)
 chat.87-99-156-174.sslip.io {
 	reverse_proxy 127.0.0.1:8899
+}
+
+# Agent — Agent Anatomy projections ONLY.
+#
+# The platform's Agent Anatomy app reads the agent's manifest, then calls the
+# agent RUNTIME directly from the browser at {entrypoint}/agents/{id}/anatomy
+# and /flow. That forces the runtime to be reachable, which the chat vhost
+# above deliberately avoids: AgentOS publishes ~50 endpoints — including
+# POST /agents/{id}/runs, i.e. free LLM invocation on our keys — and its only
+# protection is a Bearer token.
+#
+# So this vhost is an ALLOWLIST, not a proxy: exactly the two read-only
+# projections pass, everything else 403s before it reaches the agent. The
+# agent binds 127.0.0.1:8888 (docker-compose.vm.yml), so this is the only
+# route in.
+#
+#   - Bearer INJECTED here, never held by the browser: the anatomy client
+#     sends no Authorization at all (the session token would be the wrong
+#     audience and the agent's API key is not something a browser may hold),
+#     so caddy supplies it. {$AGENT_API_KEY} comes from caddy's environment
+#     on the VM — it must NEVER be written into this file, which is public.
+#   - CORS at the proxy layer, exact origin (never '*'): same reasoning as
+#     the API block above — caddy-generated errors carry it too, which
+#     app-level CORS cannot cover. AgentOS's own CORS allows only
+#     localhost:3000 and agno.com, so without this the app is blocked.
+#   - Preflights answered here: browsers send no credentials on OPTIONS, so
+#     forwarding one to the Bearer gate would 401 and kill the request
+#     before the GET is ever attempted.
+agent.87-99-156-174.sslip.io {
+	@anatomy path_regexp anatomy ^/agents/[^/]+/(anatomy|flow)$
+	@preflight method OPTIONS
+
+	handle @anatomy {
+		header Access-Control-Allow-Origin "https://d17vo467ni40fj.cloudfront.net"
+		header Access-Control-Allow-Methods "GET, OPTIONS"
+		header Access-Control-Allow-Headers "Content-Type"
+		header Access-Control-Max-Age "3600"
+		header Vary "Origin"
+
+		respond @preflight 204
+
+		reverse_proxy 127.0.0.1:8888 {
+			header_up Authorization "Bearer {$AGENT_API_KEY}"
+		}
+	}
+
+	# Default DENY — /runs, /health, /config and the rest of AgentOS.
+	handle {
+		respond "not exposed" 403
+	}
 }
