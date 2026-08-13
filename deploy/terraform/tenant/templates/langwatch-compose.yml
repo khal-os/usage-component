@@ -18,9 +18,9 @@ x-langwatch-env: &langwatch-env
   NEXTAUTH_URL: ${LANGWATCH_PUBLIC_URL}
   LANGWATCH_API_URL: ${LANGWATCH_PUBLIC_URL}
   NEXTAUTH_PROVIDER: email
-  NEXTAUTH_SECRET: ${LW_NEXTAUTH_SECRET:?from the tenant secret}
-  API_TOKEN_JWT_SECRET: ${LW_API_TOKEN_JWT_SECRET:?from the tenant secret}
-  CREDENTIALS_SECRET: ${LW_CREDENTIALS_SECRET:?from the tenant secret — must never change after first boot}
+  NEXTAUTH_SECRET: ${LANGWATCH_NEXTAUTH_SECRET:?from the tenant secret}
+  API_TOKEN_JWT_SECRET: ${LANGWATCH_API_TOKEN_JWT_SECRET:?from the tenant secret}
+  CREDENTIALS_SECRET: ${LANGWATCH_CREDENTIALS_SECRET:?from the tenant secret — must never change after first boot}
 
 x-langwatch-deps: &langwatch-deps
   postgres:
@@ -93,7 +93,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${LW_POSTGRES_MEMORY_LIMIT:-256m}
+          memory: ${LANGWATCH_POSTGRES_MEMORY_LIMIT:-256m}
 
   redis:
     image: redis:7-alpine
@@ -109,7 +109,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${LW_REDIS_MEMORY_LIMIT:?the ingest queue's burst headroom — decision 139}
+          memory: ${LANGWATCH_REDIS_MEMORY_LIMIT:?the ingest queue's burst headroom — decision 139}
 
   clickhouse:
     image: langwatch/clickhouse-serverless:0.2.0
@@ -131,8 +131,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${LW_CLICKHOUSE_MEMORY_LIMIT:?capacity is declared — decision 139}
-          cpus: ${LW_CLICKHOUSE_CPU_LIMIT:?capacity is declared — decision 139}
+          memory: ${LANGWATCH_CLICKHOUSE_MEMORY_LIMIT:?capacity is declared — decision 139}
+          cpus: ${LANGWATCH_CLICKHOUSE_CPU_LIMIT:?capacity is declared — decision 139}
 
 volumes:
   db-data:

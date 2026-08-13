@@ -20,6 +20,9 @@ locals {
     { name = "ENVIRONMENT", value = "production" },
     { name = "CLIENT_NAME", value = var.client_name },
     { name = "CLIENT_TIMEZONE", value = var.client_timezone },
+    # Parity fix (ADR-103 sweep): were compose-only; AWS ran on app defaults.
+    { name = "LOG_LEVEL", value = var.log_level },
+    { name = "LOG_FORMAT", value = var.log_format },
   ])
 
   log_conf = {

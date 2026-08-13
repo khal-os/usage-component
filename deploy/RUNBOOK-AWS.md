@@ -36,9 +36,9 @@ tenant, nothing defaults).
    aws secretsmanager put-secret-value --secret-id usage/<client> --secret-string '{
      "MONGO_DB_HOST": "<cluster>.mongodb.net",
      "MONGO_DB_USER": "...", "MONGO_DB_PASSWORD": "...",
-     "LW_NEXTAUTH_SECRET": "<openssl rand -base64 32>",
-     "LW_API_TOKEN_JWT_SECRET": "<openssl rand -base64 32>",
-     "LW_CREDENTIALS_SECRET": "<openssl rand -base64 32 — NEVER change after first boot>",
+     "LANGWATCH_NEXTAUTH_SECRET": "<openssl rand -base64 32>",
+     "LANGWATCH_API_TOKEN_JWT_SECRET": "<openssl rand -base64 32>",
+     "LANGWATCH_CREDENTIALS_SECRET": "<openssl rand -base64 32 — NEVER change after first boot>",
      "BASIC_AUTH_USER": "<client slug is fine>",
      "BASIC_AUTH_PASSWORD": "<openssl rand -base64 24 — decision 141; drop the pair (and set enable_basic_auth=false) only when the KHAL quartet takes over>"
    }'

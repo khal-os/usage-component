@@ -73,15 +73,15 @@ variable "langwatch_memory_limit" {
   type = string
 }
 
-variable "lw_redis_memory_limit" {
+variable "langwatch_redis_memory_limit" {
   type = string
 }
 
-variable "lw_clickhouse_memory_limit" {
+variable "langwatch_clickhouse_memory_limit" {
   type = string
 }
 
-variable "lw_clickhouse_cpu_limit" {
+variable "langwatch_clickhouse_cpu_limit" {
   type = string
 }
 
@@ -124,6 +124,25 @@ variable "trace_ingestion_batch_size" {
 variable "trace_ingestion_quiet_period_seconds" {
   type    = number
   default = 900
+}
+
+# Parity fix (ADR-103 sweep): previously compose-only — its three ingestion
+# siblings all had terraform plumbing, this one did not.
+variable "reprocess_interval_seconds" {
+  type    = number
+  default = 3600
+}
+
+# ── Logging (parity fix: were compose-only; AWS ran on app defaults) ─────────
+
+variable "log_level" {
+  type    = string
+  default = "info"
+}
+
+variable "log_format" {
+  type    = string
+  default = "json"
 }
 
 # ── Scheduler (decision 131 — auto-close ON in the factory) ──────────────────

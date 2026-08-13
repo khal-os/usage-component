@@ -2,8 +2,9 @@
 # (decision 139: no defaults for any of it). Copy per client and commit:
 # tfvars hold no secrets (those live in Secrets Manager).
 
-region       = "us-east-1"
-state_bucket = "namastex-usage-tfstate-648426765611"
+region              = "sa-east-1"
+state_bucket        = "namastex-usage-tfstate-504557607647"
+state_bucket_region = "sa-east-1"
 
 client_name         = "example"
 client_timezone     = "America/Sao_Paulo"
@@ -22,6 +23,6 @@ langwatch_instance_type    = "t3.large"
 langwatch_volume_gb        = 100
 langwatch_workers_replicas = 2
 langwatch_memory_limit     = "2g"
-lw_redis_memory_limit      = "1g"
-lw_clickhouse_memory_limit = "3g"
-lw_clickhouse_cpu_limit    = "1.5"
+langwatch_redis_memory_limit      = "1g"
+langwatch_clickhouse_memory_limit = "3g"
+langwatch_clickhouse_cpu_limit    = "1.5"

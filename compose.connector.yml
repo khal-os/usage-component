@@ -57,9 +57,9 @@ x-langwatch-env: &langwatch-env
   # and bounce on another). And CREDENTIALS_SECRET set late is unrecoverable
   # (stored credentials become undecryptable), so empty-then-fix is the
   # worst path — refuse it loudly here.
-  NEXTAUTH_SECRET: ${LW_NEXTAUTH_SECRET:?generate with `openssl rand -base64 32` (clients/<name>.env)}
-  API_TOKEN_JWT_SECRET: ${LW_API_TOKEN_JWT_SECRET:?generate with `openssl rand -base64 32` (clients/<name>.env)}
-  CREDENTIALS_SECRET: ${LW_CREDENTIALS_SECRET:?generate with `openssl rand -base64 32` (clients/<name>.env) — must never change after first boot}
+  NEXTAUTH_SECRET: ${LANGWATCH_NEXTAUTH_SECRET:?generate with `openssl rand -base64 32` (clients/<name>.env)}
+  API_TOKEN_JWT_SECRET: ${LANGWATCH_API_TOKEN_JWT_SECRET:?generate with `openssl rand -base64 32` (clients/<name>.env)}
+  CREDENTIALS_SECRET: ${LANGWATCH_CREDENTIALS_SECRET:?generate with `openssl rand -base64 32` (clients/<name>.env) — must never change after first boot}
 
 x-langwatch-deps: &langwatch-deps
   postgres:
@@ -249,7 +249,7 @@ services:
           # Defaults sized for 1 app + 1 worker; raise via the client env
           # when LANGWATCH_WORKERS_REPLICAS > 1 (N replicas multiply
           # connections and write volume into this single store).
-          memory: ${LW_POSTGRES_MEMORY_LIMIT:-256m}
+          memory: ${LANGWATCH_POSTGRES_MEMORY_LIMIT:-256m}
 
   redis:
     image: redis:7-alpine
@@ -269,7 +269,7 @@ services:
           # 1000 traces/s test grew the backlog into an OOM. Size it for
           # burst absorption (backlog, not OOM); upstream had raised it
           # from 64m after BGSAVE OOM kills already.
-          memory: ${LW_REDIS_MEMORY_LIMIT:?set LW_REDIS_MEMORY_LIMIT in the client env (the ingest queue's burst headroom — decision 139)}
+          memory: ${LANGWATCH_REDIS_MEMORY_LIMIT:?set LANGWATCH_REDIS_MEMORY_LIMIT in the client env (the ingest queue's burst headroom — decision 139)}
 
   clickhouse:
     image: langwatch/clickhouse-serverless:0.2.0
@@ -291,8 +291,8 @@ services:
           # Decision 139: writes under burst starve reads on a shared box
           # (the incident's "trace list loads forever") — declared, sized
           # with read-path headroom.
-          memory: ${LW_CLICKHOUSE_MEMORY_LIMIT:?set LW_CLICKHOUSE_MEMORY_LIMIT in the client env (capacity is declared — decision 139)}
-          cpus: ${LW_CLICKHOUSE_CPU_LIMIT:?set LW_CLICKHOUSE_CPU_LIMIT in the client env (capacity is declared — decision 139)}
+          memory: ${LANGWATCH_CLICKHOUSE_MEMORY_LIMIT:?set LANGWATCH_CLICKHOUSE_MEMORY_LIMIT in the client env (capacity is declared — decision 139)}
+          cpus: ${LANGWATCH_CLICKHOUSE_CPU_LIMIT:?set LANGWATCH_CLICKHOUSE_CPU_LIMIT in the client env (capacity is declared — decision 139)}
 
 volumes:
   db-data:

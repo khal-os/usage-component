@@ -23,6 +23,9 @@ resource "aws_ecs_task_definition" "connector" {
       { name = "TRACE_INGESTION_INTERVAL_SECONDS", value = tostring(var.trace_ingestion_interval_seconds) },
       { name = "TRACE_INGESTION_BATCH_SIZE", value = tostring(var.trace_ingestion_batch_size) },
       { name = "TRACE_INGESTION_QUIET_PERIOD_SECONDS", value = tostring(var.trace_ingestion_quiet_period_seconds) },
+      # Parity fix (ADR-103 sweep): its three ingestion siblings all had
+      # terraform plumbing, this one was compose-only.
+      { name = "REPROCESS_INTERVAL_SECONDS", value = tostring(var.reprocess_interval_seconds) },
       # Stable private DNS name (review fix) — survives instance
       # replacement without task-def churn.
       { name = "LANGWATCH_CLICKHOUSE_URL", value = "http://${aws_route53_record.clickhouse.name}:8123" },

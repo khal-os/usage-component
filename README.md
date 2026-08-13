@@ -268,5 +268,5 @@ client-agnostic).
   trace-ingestion-worker and `make sync`. Only the ROOT
   `package-lock.json` is authoritative; `tsc` always runs in-image because
   the local `dist/` may be stale.
-- **LangWatch secrets** (`LW_*`) are per instance; `LW_CREDENTIALS_SECRET`
+- **LangWatch secrets** (`LANGWATCH_*`) are per instance; `LANGWATCH_CREDENTIALS_SECRET`
   must never change after first boot.
