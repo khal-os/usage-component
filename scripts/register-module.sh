@@ -56,8 +56,8 @@ set -euo pipefail
 MODULE_ID="${MODULE_ID:-tracing}"
 # Canonical khal spellings only (decision 133 — legacy names removed pre-prod).
 TENANT="${KHAL_TENANT:-$CLIENT}"
-M2M_CLIENT_ID="${KHAL_CLIENT_ID:-}"
-M2M_CLIENT_SECRET="${KHAL_CLIENT_SECRET:-}"
+KHAL_CLIENT_ID="${KHAL_CLIENT_ID:-}"
+KHAL_CLIENT_SECRET="${KHAL_CLIENT_SECRET:-}"
 # ADR-97: one discovery URL resolves catalog + auth. Explicit vars win.
 MODULE_CATALOG_URL="${MODULE_CATALOG_URL:-}"
 if [[ -n "${KHAL_DISCOVERY_URL:-}" ]]; then
@@ -98,8 +98,8 @@ m2m_session() {
   curl -sS -X POST "${AUTH_SYSTEM_URL%/}/oauth/token" \
     -H 'content-type: application/x-www-form-urlencoded' \
     --data-urlencode 'grant_type=client_credentials' \
-    --data-urlencode "client_id=${M2M_CLIENT_ID}" \
-    --data-urlencode "client_secret=${M2M_CLIENT_SECRET}" \
+    --data-urlencode "client_id=${KHAL_CLIENT_ID}" \
+    --data-urlencode "client_secret=${KHAL_CLIENT_SECRET}" \
     | python3 -c "import json,sys;print(json.load(sys.stdin)['access_token'])"
 }
 
@@ -113,7 +113,7 @@ print(base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
 }
 
 if [[ -z "${TOKEN:-}" ]]; then
-  if [[ -n "${AUTH_SYSTEM_URL:-}" && -n "${M2M_CLIENT_ID:-}" && -n "${M2M_CLIENT_SECRET:-}" ]]; then
+  if [[ -n "${AUTH_SYSTEM_URL:-}" && -n "${KHAL_CLIENT_ID:-}" && -n "${KHAL_CLIENT_SECRET:-}" ]]; then
     TOKEN="$(m2m_session)"
     echo "session obtained from the M2M Auth System (${AUTH_SYSTEM_URL})"
   else

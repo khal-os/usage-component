@@ -108,11 +108,11 @@ resource "aws_ssm_parameter" "langwatch_capacity" {
   type = "String"
 
   value = jsonencode({
-    LANGWATCH_WORKERS_REPLICAS = var.langwatch_workers_replicas
-    LANGWATCH_MEMORY_LIMIT     = var.langwatch_memory_limit
-    LW_REDIS_MEMORY_LIMIT      = var.lw_redis_memory_limit
-    LW_CLICKHOUSE_MEMORY_LIMIT = var.lw_clickhouse_memory_limit
-    LW_CLICKHOUSE_CPU_LIMIT    = var.lw_clickhouse_cpu_limit
+    LANGWATCH_WORKERS_REPLICAS        = var.langwatch_workers_replicas
+    LANGWATCH_MEMORY_LIMIT            = var.langwatch_memory_limit
+    LANGWATCH_REDIS_MEMORY_LIMIT      = var.langwatch_redis_memory_limit
+    LANGWATCH_CLICKHOUSE_MEMORY_LIMIT = var.langwatch_clickhouse_memory_limit
+    LANGWATCH_CLICKHOUSE_CPU_LIMIT    = var.langwatch_clickhouse_cpu_limit
   })
 }
 

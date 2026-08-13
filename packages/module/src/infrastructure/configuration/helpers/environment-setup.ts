@@ -19,8 +19,11 @@ import {
   ServerEnvironmentVariables,
 } from '../interfaces/index.js';
 
+// ADR-103 (khal-platform) vocabulary: development | homolog | production —
+// plus `test`, allowed only inside test runners.
 const environmentEnum = {
   PRODUCTION: 'production',
+  HOMOLOG: 'homolog',
   TEST: 'test',
   DEVELOPMENT: 'development',
 } as const;
@@ -76,6 +79,7 @@ const envSchema = z
   .object({
     ENVIRONMENT: z.enum([
       environmentEnum.PRODUCTION,
+      environmentEnum.HOMOLOG,
       environmentEnum.TEST,
       environmentEnum.DEVELOPMENT,
     ] as const),
