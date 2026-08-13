@@ -28,6 +28,18 @@ variable "client_name" {
   }
 }
 
+# ADR-103 <env> axis for paths (khal/<client>/<env>/usage/*). The AWS
+# deployment of a client is its production by definition; homolog exists for
+# staging silos.
+variable "environment" {
+  type    = string
+  default = "production"
+  validation {
+    condition     = contains(["homolog", "production"], var.environment)
+    error_message = "environment must be homolog or production (ADR-103)."
+  }
+}
+
 variable "client_timezone" {
   description = "Decision 130: the client's billing boundary = display zone (IANA)."
   type        = string

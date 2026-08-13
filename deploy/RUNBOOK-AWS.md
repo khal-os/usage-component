@@ -31,14 +31,21 @@ tenant, nothing defaults).
    terraform init -backend-config=backend.hcl
    terraform apply -var-file=tenants/<client>.tfvars
    ```
-3. **Fill the tenant secret** (value never touches git/state):
+3. **Fill the tenant secrets** (ADR-103: one JSON per family, keys == env var
+   names; values never touch git/state). Migrating an existing client instead?
+   Run `CLIENT=<client> ./deploy/scripts/migrate-adr103.sh` and skip this step.
    ```bash
-   aws secretsmanager put-secret-value --secret-id usage/<client> --secret-string '{
+   aws secretsmanager put-secret-value --secret-id khal/<client>/production/usage/mongo --secret-string '{
      "MONGO_DB_HOST": "<cluster>.mongodb.net",
-     "MONGO_DB_USER": "...", "MONGO_DB_PASSWORD": "...",
+     "MONGO_DB_USER": "...", "MONGO_DB_PASSWORD": "..."
+   }'
+   aws secretsmanager put-secret-value --secret-id khal/<client>/production/usage/langwatch --secret-string '{
      "LANGWATCH_NEXTAUTH_SECRET": "<openssl rand -base64 32>",
      "LANGWATCH_API_TOKEN_JWT_SECRET": "<openssl rand -base64 32>",
      "LANGWATCH_CREDENTIALS_SECRET": "<openssl rand -base64 32 — NEVER change after first boot>",
+     "LANGWATCH_CLICKHOUSE_PASSWORD": "langwatch"
+   }'
+   aws secretsmanager put-secret-value --secret-id khal/<client>/production/usage/basic-auth --secret-string '{
      "BASIC_AUTH_USER": "<client slug is fine>",
      "BASIC_AUTH_PASSWORD": "<openssl rand -base64 24 — decision 141; drop the pair (and set enable_basic_auth=false) only when the KHAL quartet takes over>"
    }'
@@ -54,7 +61,7 @@ tenant, nothing defaults).
    write the project id (the connector is in a deliberate restart loop
    until this exists — audit G-1):
    ```bash
-   aws ssm put-parameter --overwrite --name /usage/<client>/langwatch-project-id --value <project_...>
+   aws ssm put-parameter --overwrite --name /khal/<client>/production/usage/langwatch-project-id --value <project_...>
    aws ecs update-service --cluster usage-main --service usage-<client>-connector --force-new-deployment
    ```
    Hand the client's agent platform the OTLP base `https://<client>-langwatch.<domain>`.

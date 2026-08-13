@@ -30,7 +30,6 @@ resource "aws_ecs_task_definition" "connector" {
       # replacement without task-def churn.
       { name = "LANGWATCH_CLICKHOUSE_URL", value = "http://${aws_route53_record.clickhouse.name}:8123" },
       { name = "LANGWATCH_CLICKHOUSE_USER", value = "default" },
-      { name = "LANGWATCH_CLICKHOUSE_PASSWORD", value = "langwatch" },
       { name = "LANGWATCH_CLICKHOUSE_DATABASE", value = "langwatch" },
     ])
     # Whitespace placeholder until onboarding: the connector TRIMS it to
@@ -38,7 +37,10 @@ resource "aws_ecs_task_definition" "connector" {
     # exits 1 in a VISIBLE restart loop (audit G-1; the trim + factory
     # gate are the app-side halves of this contract).
     secrets = concat(local.mongo_secrets, [
-      { name = "LANGWATCH_PROJECT_ID", valueFrom = aws_ssm_parameter.langwatch_project_id.arn },
+      { name = "LANGWATCH_PROJECT_ID", valueFrom = aws_ssm_parameter.langwatch_project_id_v2.arn },
+      # ADR-103: was plaintext in the task def — the one credential outside
+      # Secrets Manager; now a key of the langwatch family secret.
+      { name = "LANGWATCH_CLICKHOUSE_PASSWORD", valueFrom = "${aws_secretsmanager_secret.usage["langwatch"].arn}:LANGWATCH_CLICKHOUSE_PASSWORD::" },
     ])
     logConfiguration = local.log_conf["connector"]
   }])

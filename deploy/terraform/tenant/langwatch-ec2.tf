@@ -74,8 +74,13 @@ resource "aws_iam_role_policy_attachment" "langwatch_ssm" {
 
 data "aws_iam_policy_document" "langwatch_boot" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.tenant.arn]
+    actions = ["secretsmanager:GetSecretValue"]
+    # Canonical langwatch family secret + legacy JSON (until step B — a
+    # running instance keeps its old tenant.conf until re-provisioned).
+    resources = [
+      aws_secretsmanager_secret.usage["langwatch"].arn,
+      aws_secretsmanager_secret.tenant.arn,
+    ]
   }
 
   statement {
@@ -104,7 +109,7 @@ data "aws_iam_policy_document" "langwatch_boot" {
 # `terraform apply` + service restart — never an instance replacement
 # fighting prevent_destroy.
 resource "aws_ssm_parameter" "langwatch_capacity" {
-  name = "/usage/${var.client_name}/langwatch-capacity"
+  name = "${local.ssm_base}/langwatch-capacity"
   type = "String"
 
   value = jsonencode({
@@ -165,7 +170,7 @@ resource "aws_instance" "langwatch" {
   # every service start) — user_data changes are structural and rare.
   user_data = templatefile("${path.module}/templates/langwatch-user-data.sh.tftpl", {
     client_name          = var.client_name
-    secret_arn           = aws_secretsmanager_secret.tenant.arn
+    secret_arn           = aws_secretsmanager_secret.usage["langwatch"].arn
     region               = var.region
     langwatch_public_url = "https://${local.langwatch_hostname}"
     capacity_param       = aws_ssm_parameter.langwatch_capacity.name

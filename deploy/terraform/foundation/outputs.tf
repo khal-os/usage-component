@@ -14,6 +14,11 @@ output "ecs_cluster_name" {
   value = aws_ecs_cluster.main.name
 }
 
+output "ecr_repository_urls_v2" {
+  description = "Canonical four-axis repos (ADR-103 R8), keyed by short name."
+  value       = { for k, r in aws_ecr_repository.images_v2 : k => r.repository_url }
+}
+
 output "ecr_repository_urls" {
   value = { for k, r in aws_ecr_repository.images : k => r.repository_url }
 }
