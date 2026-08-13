@@ -112,7 +112,8 @@ fi
 
 # The manifest declares what the module OFFERS — the full capability tuple
 # (signal, operation, transport, protocol, protocol version, encoding). The
-# module serves traces/sessions/billing reads over its REST API (/api/v1).
+# module serves traces/sessions AND billing reads over its REST API (/api/v1):
+# the Tracing app resolves tracing.sessions, the Billing app billing.ledger.
 # `capability` must exist in the tenant vocabulary (dev seed: billing.ledger,
 # tracing.sessions — 422 UNKNOWN_VOCABULARY_REF otherwise); the tuple fields
 # ride along as tolerant-reader extras until the platform models them.
@@ -131,6 +132,19 @@ MANIFEST=$(cat <<EOF
     {
       "capability": "tracing.sessions",
       "signal": "monitoring.trace",
+      "operation": "read",
+      "bindings": [
+        {
+          "transport": "http",
+          "protocol": "rest",
+          "protocolVersion": "v1",
+          "encoding": "json"
+        }
+      ]
+    },
+    {
+      "capability": "billing.ledger",
+      "signal": "billing.ledger",
       "operation": "read",
       "bindings": [
         {
