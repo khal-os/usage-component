@@ -10,7 +10,7 @@ client_name         = "namastex"
 client_timezone     = "America/Sao_Paulo"
 mongo_usage_db_name = "usage_db"
 
-image_sha = "7865e9f47345db42ef58383c6a0796ec8af4713b"
+image_sha = "3cba43da27c4af6d52b3f20bab8eb4ebb4c6890e"
 
 # Session auth (replaced the interim Basic gate of decision 141): /api/v1
 # requires a khal-auth session JWT issued by this khal-auth.
