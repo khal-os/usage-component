@@ -31,15 +31,41 @@ x-langwatch-deps: &langwatch-deps
     condition: service_healthy
 
 services:
+  # Embed proxy — owns host port 5560 (what the ALB target group points at)
+  # and rewrites two response headers LangWatch hardcodes and cannot
+  # configure: the `frame-ancestors 'none'` CSP, and `SameSite=Lax` session
+  # cookies that a browser will not send inside a cross-site iframe. See
+  # langwatch-caddy.Caddyfile.tftpl for the full rationale.
+  #
+  # This replaces edits that used to be made by hand INSIDE the app container
+  # and silently died on every container recreation. Sitting in front of the
+  # app, it also survives LangWatch upgrades.
+  langwatch-embed-proxy:
+    image: caddy:2-alpine
+    container_name: ${CLIENT_NAME}-langwatch-embed-proxy
+    ports:
+      # 0.0.0.0 is safe HERE only because the instance is in a private
+      # subnet and the SG admits just the ALB (5560) and connector (8123).
+      - "5560:5560"
+    volumes:
+      - /opt/langwatch/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      langwatch:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
   langwatch:
     image: langwatch/langwatch:3.5.0
     container_name: ${CLIENT_NAME}-langwatch
     environment:
       <<: *langwatch-env
-    ports:
-      # 0.0.0.0 is safe HERE only because the instance is in a private
-      # subnet and the SG admits just the ALB (5560) and connector (8123).
-      - "5560:5560"
+    # No `ports:` — the proxy above owns 5560 on the host. The app still
+    # listens on 5560 inside the compose network, so LANGWATCH_ENDPOINT
+    # (http://langwatch:5560, used by the workers) is unchanged.
     depends_on:
       <<: *langwatch-deps
     healthcheck:

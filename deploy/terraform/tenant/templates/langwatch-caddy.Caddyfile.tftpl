@@ -1,0 +1,42 @@
+# Embed proxy in front of LangWatch — rendered by terraform, fetched from S3
+# by langwatch-bootstrap.service, bind-mounted into the `caddy` container.
+#
+# WHY THIS EXISTS. LangWatch 3.5.0 hardcodes two things that make it
+# unembeddable, and exposes no configuration for either:
+#
+#   - `frame-ancestors 'none'` (src/start.ts) — the browser refuses to frame
+#     it in the Khal desktop at all;
+#   - better-auth session cookies ship `SameSite=Lax` — the browser accepts
+#     the frame but never SENDS the cookie inside a cross-site iframe, so the
+#     embed loads and the login silently loops.
+#
+# Both were patched BY HAND inside the running container (docker exec + sed)
+# through most of 2026-08. Those edits survive `docker restart` but die on
+# container recreation — i.e. on the very next compose change — and left no
+# trace in any repo. This file is that fix made durable: the rewrites now live
+# in front of the app, so they also survive LangWatch upgrades, which a
+# source patch never would.
+#
+# `Partitioned` (CHIPS) is not decoration: incognito Chrome blocks ALL
+# third-party cookies regardless of SameSite, which silently looped iframe
+# login (incident 2026-08-11). Partitioned cookies are exempt.
+#
+# The ALB terminates TLS and speaks plain HTTP to the box, so no TLS here.
+
+{
+	auto_https off
+	admin off
+}
+
+:5560 {
+	reverse_proxy langwatch:5560 {
+		# Substitute ONLY the frame-ancestors directive — the rest of
+		# LangWatch's CSP (posthog, crisp, pendo, jsdelivr...) must survive
+		# intact, so this is a search/replace, never a whole-header rewrite.
+		header_down Content-Security-Policy "frame-ancestors 'none'" "frame-ancestors 'self' ${embed_origin}"
+
+		# Cross-site iframe cookies. Secure is set explicitly: the app is
+		# behind TLS termination and does not always mark it itself.
+		header_down Set-Cookie "SameSite=Lax" "SameSite=None; Secure; Partitioned"
+	}
+}

@@ -133,6 +133,19 @@ resource "aws_s3_object" "langwatch_bootstrap" {
   etag    = filemd5("${path.module}/templates/langwatch-bootstrap.sh")
 }
 
+# Embed proxy config. RENDERED, not copied, because the framing origin is a
+# tenant input. The bootstrap derives this object's key from the compose one
+# rather than reading a new tenant.conf entry — tenant.conf is written by
+# user_data, which cloud-init runs once per instance and would therefore never
+# reach the running box.
+resource "aws_s3_object" "langwatch_caddyfile" {
+  bucket = local.fdn.backups_bucket_name
+  key    = "config/${var.client_name}/langwatch-caddy.Caddyfile"
+  content = templatefile("${path.module}/templates/langwatch-caddy.Caddyfile.tftpl", {
+    embed_origin = var.langwatch_embed_origin
+  })
+}
+
 resource "aws_iam_role_policy" "langwatch_boot" {
   name   = "boot-and-metrics"
   role   = aws_iam_role.langwatch.id

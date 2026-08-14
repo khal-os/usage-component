@@ -16,6 +16,13 @@ cd /opt/langwatch
 
 aws s3 cp "$COMPOSE_S3_URI" compose.yml --region "$REGION"
 
+# Embed-proxy config, from the same config/ prefix as the compose file. The
+# URI is DERIVED rather than read from tenant.conf on purpose: tenant.conf is
+# written by user-data, which cloud-init runs once per instance — a new key
+# there would never reach a box that is already running.
+CADDY_S3_URI="${COMPOSE_S3_URI%/*}/langwatch-caddy.Caddyfile"
+aws s3 cp "$CADDY_S3_URI" Caddyfile --region "$REGION"
+
 SECRET_JSON=$(aws secretsmanager get-secret-value \
   --secret-id "$SECRET_ARN" --region "$REGION" \
   --query SecretString --output text)

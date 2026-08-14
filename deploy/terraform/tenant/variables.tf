@@ -116,6 +116,24 @@ variable "khal_auth_url" {
   default     = ""
 }
 
+variable "langwatch_embed_origin" {
+  description = <<-EOT
+    Origin allowed to frame LangWatch — the Khal desktop shell. The embed
+    proxy rewrites LangWatch's hardcoded `frame-ancestors 'none'` to
+    `'self' <this>`. Exact origin only, NEVER "*": this is a frame-ancestors
+    value and a wildcard there is a clickjacking hole.
+    Empty = the proxy still runs (it also fixes the iframe cookies) but the
+    CSP rewrite collapses to `'self'` — i.e. not embeddable.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.langwatch_embed_origin == "" || can(regex("^https://[a-z0-9.-]+$", var.langwatch_embed_origin))
+    error_message = "langwatch_embed_origin must be an exact https origin, no path and no trailing slash (e.g. https://hapvida.khal-usage.com)."
+  }
+}
+
 variable "khal_token_audience" {
   description = <<-EOT
     Accepted `aud` claims of the session JWT, comma-separated — a token
