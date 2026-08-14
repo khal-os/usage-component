@@ -21,8 +21,14 @@ khal_auth_url = "https://auth.khal-usage.com"
 # Both browser readers of this module's data: Tracing (capability
 # tracing.sessions) and Billing (capability billing.ledger). The default
 # of var.khal_token_audience already lists the two audiences.
-# audit D-1: exact app origins (CloudFront) + the desktop shell.
-cors_allowed_origins = "https://dtxfram9qv3pw.cloudfront.net,https://d1wk8ax9c2hb4n.cloudfront.net,https://desktop.khal-usage.com"
+# audit D-1: exact app origins (CloudFront) + both desktop shell hosts
+# (hapvida.* is the demo host; desktop.* kept so nothing has to be timed
+# with that cutover).
+cors_allowed_origins = "https://dtxfram9qv3pw.cloudfront.net,https://d1wk8ax9c2hb4n.cloudfront.net,https://hapvida.khal-usage.com,https://desktop.khal-usage.com"
+
+# The desktop shell that frames the LangWatch tile. Single value, not a list:
+# a CSP frame-ancestors rewrite names the one host allowed to frame it.
+langwatch_embed_origin = "https://hapvida.khal-usage.com"
 
 # COST-FLOOR sizing (user decision 2026-08-10: cheapest now, load-test
 # gate DEFERRED — upsize these + rerun the 1000/s gate before any real

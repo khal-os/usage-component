@@ -98,11 +98,21 @@ and no overrides.
 ## LangWatch EC2 operations
 
 - Shell: `aws ssm start-session --target <instance-id>` (no SSH, no keys).
-- Stack lives in `/opt/langwatch` (compose.yml + generated .env), driven by
-  `langwatch-bootstrap.service`: on EVERY service start it re-fetches the
-  compose file + bootstrap from S3, the LW secrets from Secrets Manager and
-  the capacity knobs from SSM, regenerates .env, and `compose up`s. The
-  .env is DISPOSABLE output — never hand-edit it as a source of truth.
+- Stack lives in `/opt/langwatch` (compose.yml + Caddyfile + generated .env),
+  driven by `langwatch-bootstrap.service`: on EVERY service start it re-fetches
+  the compose file, the bootstrap and the Caddyfile from S3, the LW secrets
+  from Secrets Manager and the capacity knobs from SSM, regenerates .env, and
+  `compose up`s. The .env is DISPOSABLE output — never hand-edit it as a
+  source of truth.
+- **Embed proxy** (`langwatch-embed-proxy`, caddy): owns host port 5560 — the
+  ALB target — and proxies to the app over the compose network. It exists
+  because LangWatch hardcodes `frame-ancestors 'none'` and `SameSite=Lax`
+  session cookies, with no configuration for either, which makes it
+  unembeddable in the Khal desktop. The proxy rewrites both. To change which
+  desktop may frame it, edit `langwatch_embed_origin` in the tenant tfvars →
+  `terraform apply` → restart (below). **Never patch the app container by
+  hand:** that is exactly what this replaced, and those edits die silently on
+  the next container recreation.
 - Capacity retune (incl. load-testing): edit tfvars → `terraform apply`
   (updates the SSM capacity parameter — NO instance replacement) → restart:
   `aws ssm send-command --document-name AWS-RunShellScript \
