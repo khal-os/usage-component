@@ -732,8 +732,11 @@ CLIENT="${1:?usage: preflight-aws.sh [--gate] <client> | preflight-aws.sh --flee
 tenant_load "${CLIENT}"
 
 # The region comes from the tenant file, not from the ambient profile: an
-# audit that silently reads another region reports green on nothing.
+# audit that silently reads another region reports green on nothing. Same
+# for the account — khal-* names are scoped by client and env but not by
+# account, so the wrong profile reports every resource as absent.
 export AWS_REGION="${TENANT_REGION}"
+assert_account
 
 if [ "${MODE}" = "gate" ]; then
   gate
