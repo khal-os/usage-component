@@ -6,7 +6,7 @@
 # client there is no single AWS_DEPLOY_ROLE_ARN to hold, and a repository
 # variable per client would be a second place for the account id to drift
 # from deploy/tenants/<client>.env.
-name: deploy-tenant
+name: Deploy a tenant
 
 on:
   workflow_dispatch:

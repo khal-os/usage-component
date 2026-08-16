@@ -7,7 +7,7 @@
 # The account list is deploy/tenants/*.env (AWS_ACCOUNT_ID in each), so
 # onboarding a client is committing a file. No per-client GitHub variable
 # exists: every role ARN is computed by naming.sh.
-name: build-images
+name: Publish images to ECR
 
 on:
   push:

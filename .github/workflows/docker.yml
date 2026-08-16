@@ -4,7 +4,7 @@
 # image builds). This lane builds every image on the PR itself, no push,
 # and Trivy-scans the runtime images. deploy-smoke runs the docker-free
 # deploy-script regression that previously only ran via `make deploy-smoke`.
-name: Docker
+name: Image build & scan
 
 on:
   push:
