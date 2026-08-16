@@ -180,6 +180,26 @@ env_word() {
   esac
 }
 
+# ── the account guard ───────────────────────────────────────────────────────
+# NOT part of tenant_load: naming.sh must answer offline, and the smoke
+# suite runs it with no AWS at all. Callers that are about to touch AWS
+# invoke this explicitly.
+#
+# Every khal-* name is scoped by client and env but NOT by account, so the
+# same names can exist in more than one account — and today they do share
+# one: the hapvida silo lives beside usage-main and khal-web-desktop in
+# 504557607647 (decision 163). A profile pointing at the wrong account
+# would therefore either report everything as absent, or in the
+# multi-account future find same-named resources belonging to someone else.
+# get-caller-identity needs no permission, so this costs nothing.
+assert_account() {
+  local live
+  live="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
+  [ -n "${live}" ] || _naming_die "cannot read the current AWS identity — are credentials configured?"
+  [ "${live}" = "${AWS_ACCOUNT_ID}" ] || _naming_die \
+    "wrong account: credentials are in ${live}, but ${TENANT_FILE} declares ${AWS_ACCOUNT_ID}"
+}
+
 # ── length caps ─────────────────────────────────────────────────────────────
 # Terraform used substr(…, 0, 32) in three places, which can cut a name to
 # a trailing '-' or collide two tenants. There is no truncation here: an
@@ -203,7 +223,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   _client="${1:?usage: naming.sh <client> <function> [args…]}"
   _fn="${2:?usage: naming.sh <client> <function> [args…]}"
   case "${_fn}" in
-    name_* | ecr_* | bucket_* | topic_* | secret_* | ssm_* | log_group | s3_* | hostname_* | env_word | tget) ;;
+    name_* | ecr_* | bucket_* | topic_* | secret_* | ssm_* | log_group | s3_* | hostname_* | env_word | tget | assert_account) ;;
     *) _naming_die "not an exported naming function: ${_fn}" ;;
   esac
   tenant_load "${_client}"

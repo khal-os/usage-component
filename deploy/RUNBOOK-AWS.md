@@ -9,8 +9,19 @@ tenant, nothing defaults).
 
 ## Who creates what
 
-**One AWS account per client**, and **CD creates nothing but container
-images, task-definition revisions and config artifacts.** Every other
+**One AWS account per client** is the design, and **CD creates nothing but
+container images, task-definition revisions and config artifacts.**
+
+⚠ **The account boundary is not there yet.** As of August 2026 the hapvida
+silo lives in 504557607647 alongside `usage-main` and `khal-web-desktop`
+(decision 163). Isolation today is by naming and by network, not by
+account, and two consequences are operational rather than theoretical: two
+VPCs in that account deliberately share `10.80.0.0/16`, so selecting a VPC
+or subnet **by CIDR silently returns another tenant's network** — filter by
+`vpc-id`; and the `ecs:cluster` condition on the CD role is what fences it
+away from the other two clusters, so it is load-bearing, not decoration.
+Every script that touches AWS asserts it is in the tenant's declared
+account before doing anything. Every other
 resource is created by infra, once per account, from
 `AWS-INFRA-HANDOFF.md` (or the per-client report `/aws-bootstrap
 <client> <env>` generates). On our side those resources are *asserted*,

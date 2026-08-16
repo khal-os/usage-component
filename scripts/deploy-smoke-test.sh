@@ -425,6 +425,9 @@ case_ "H · preflight --gate: pega o que a AWS não reclama"
 # ---------------------------------------------------------------------------
 export AWS_STUB_DIR="$AWSFIX" AWS_STUB_LOG="${STUBS}/aws-calls.log"
 : > "$AWS_STUB_LOG"
+# Todo script que toca a AWS confere primeiro em que conta está (decisão
+# 163), então o stub responde isso desde o primeiro caso.
+printf '111122223333\n' > "${AWSFIX}/sts_get-caller-identity.txt"
 
 services_json() { # <min> <max> <desired> — os três do connector
   python3 - "$1" "$2" "$3" <<'PY'
@@ -515,6 +518,19 @@ else
   ok "nenhum describe-task-definition: a revisão vem do template, não do que já está lá"
 fi
 
+# Conta errada tem que RECUSAR antes de qualquer escrita. Os nomes khal-*
+# são escopados por cliente e ambiente, mas NÃO por conta — o mesmo nome
+# pode existir em mais de uma, e hoje de fato dividem uma (decisão 163).
+printf '999988887777\n' > "${AWSFIX}/sts_get-caller-identity.txt"
+if TENANT_DIR="$TDIR" PATH="${STUBS}:${PATH}" \
+   bash deploy/scripts/deploy-tenant.sh --register-only smoke "$SMOKE_SHA" >/dev/null 2>&1; then
+  bash deploy/scripts/deploy-tenant.sh --register-only smoke "$SMOKE_SHA" >/dev/null 2>&1
+  bad "o deploy rodou com credenciais de OUTRA conta"
+else
+  ok "credencial na conta errada reprova antes de escrever qualquer coisa"
+fi
+printf '111122223333\n' > "${AWSFIX}/sts_get-caller-identity.txt"
+
 # ---------------------------------------------------------------------------
 case_ "J · --fleet: o dígito nomeia a conta ruim e o webhook ausente reprova"
 # ---------------------------------------------------------------------------
@@ -536,7 +552,6 @@ rm -f "${TDIR}/thirteenchars.env" "${TDIR}/mismatch.env" "${TDIR}/noenv.env" \
 # nome. Não existe assume-role aqui de propósito: o papel de auditoria é
 # confiado só pelo provedor OIDC, então assumir a partir de outro papel é
 # negado pela política de confiança (decisão 159).
-printf '111122223333\n' > "${AWSFIX}/sts_get-caller-identity.txt"
 services_json 100 200 1 > "${AWSFIX}/ecs_describe-services.json"
 
 FLEET_OUT="$(TENANT_DIR="$TDIR" PATH="${STUBS}:${PATH}" \

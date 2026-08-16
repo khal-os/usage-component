@@ -57,8 +57,10 @@ fi
 
 # The region is the tenant's, from the tenant file — never the ambient
 # profile's. A deploy that silently targets another region finds nothing
-# and says so in the least useful way possible.
+# and says so in the least useful way possible. The account guard matters
+# more here than in the audit, because this path WRITES.
 export AWS_REGION="${TENANT_REGION}"
+assert_account
 
 CLUSTER="$(name_base)"
 say() { echo "==> $*"; }
