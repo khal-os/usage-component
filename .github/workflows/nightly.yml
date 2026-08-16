@@ -6,7 +6,7 @@
 #  · vulns published for deps that no PR touched: npm audit on the
 #    whole tree, independent of any manifest diff.
 # Failures arrive as the normal workflow-failure email.
-name: Nightly
+name: Nightly code drift
 
 on:
   schedule:

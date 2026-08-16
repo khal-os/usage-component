@@ -8,7 +8,7 @@
 # role, which holds Describe/Get/List and deliberately NO
 # secretsmanager:GetSecretValue — the fleet run checks that secrets exist,
 # never their keys.
-name: fleet-heartbeat
+name: Nightly fleet audit
 
 on:
   # The nightly cron is OFF until the first account is fully deployed, and

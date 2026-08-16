@@ -9,7 +9,7 @@
 # Actions are pinned to commit SHAs (supply-chain: a moved tag cannot
 # change what runs here); Dependabot's github-actions ecosystem keeps
 # the pins current. Node comes from .nvmrc — one place to bump.
-name: CI
+name: Lint, typecheck & tests
 
 on:
   push:
