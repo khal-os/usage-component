@@ -42,6 +42,11 @@ jq_cap() { echo "$CAPACITY_JSON" | jq -er ".$1"; }
 V_NEXTAUTH=$(jq_secret LANGWATCH_NEXTAUTH_SECRET)
 V_JWT=$(jq_secret LANGWATCH_API_TOKEN_JWT_SECRET)
 V_CREDENTIALS=$(jq_secret LANGWATCH_CREDENTIALS_SECRET)
+# The fourth LangWatch key. It was in the secret and read by the Fargate
+# connector, but never by this script — so compose hardcoded it and the
+# secret's only valid value was that constant. Read here, the two halves
+# finally agree and a real random password works end to end.
+V_CH_PASSWORD=$(jq_secret LANGWATCH_CLICKHOUSE_PASSWORD)
 V_REPLICAS=$(jq_cap LANGWATCH_WORKERS_REPLICAS)
 V_LW_MEM=$(jq_cap LANGWATCH_MEMORY_LIMIT)
 V_REDIS_MEM=$(jq_cap LANGWATCH_REDIS_MEMORY_LIMIT)
@@ -54,6 +59,7 @@ LANGWATCH_PUBLIC_URL=$LANGWATCH_PUBLIC_URL
 LANGWATCH_NEXTAUTH_SECRET=$V_NEXTAUTH
 LANGWATCH_API_TOKEN_JWT_SECRET=$V_JWT
 LANGWATCH_CREDENTIALS_SECRET=$V_CREDENTIALS
+LANGWATCH_CLICKHOUSE_PASSWORD=$V_CH_PASSWORD
 LANGWATCH_WORKERS_REPLICAS=$V_REPLICAS
 LANGWATCH_MEMORY_LIMIT=$V_LW_MEM
 LANGWATCH_REDIS_MEMORY_LIMIT=$V_REDIS_MEM

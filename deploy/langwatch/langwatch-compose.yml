@@ -11,7 +11,7 @@ x-langwatch-env: &langwatch-env
   NODE_ENV: production
   INSTALL_METHOD: docker
   DATABASE_URL: postgresql://prisma:prisma@postgres:5432/mydb?schema=mydb
-  CLICKHOUSE_URL: http://default:langwatch@clickhouse:8123/langwatch
+  CLICKHOUSE_URL: http://default:${LANGWATCH_CLICKHOUSE_PASSWORD:?from the tenant secret}@clickhouse:8123/langwatch
   REDIS_URL: redis://redis:6379
   LANGWATCH_ENDPOINT: http://langwatch:5560
   BASE_HOST: ${LANGWATCH_PUBLIC_URL:?written by user-data}
@@ -107,6 +107,9 @@ services:
     environment:
       POSTGRES_DB: mydb
       POSTGRES_USER: prisma
+      # Hardcoded ON PURPOSE, unlike CLICKHOUSE_PASSWORD above: postgres
+      # publishes no port and is reachable only from this box's own docker
+      # network. Do not promote it to a fifth key of the tenant secret.
       POSTGRES_PASSWORD: prisma
     volumes:
       - db-data:/var/lib/postgresql/data
@@ -141,7 +144,12 @@ services:
     image: langwatch/clickhouse-serverless:0.2.0
     container_name: ${CLIENT_NAME}-langwatch-clickhouse
     environment:
-      CLICKHOUSE_PASSWORD: langwatch
+      # Was hardcoded `langwatch` here while the Fargate connector read the
+      # key from Secrets Manager — the same credential with two owners, so
+      # the secret's only valid value was the constant, and a real password
+      # in the secret would have broken ClickHouse reads with no clue why.
+      # One owner now: the tenant secret, via bootstrap's .env.
+      CLICKHOUSE_PASSWORD: ${LANGWATCH_CLICKHOUSE_PASSWORD:?from the tenant secret}
     ports:
       # ClickHouse reachable by the Fargate connector (SG-restricted).
       - "8123:8123"
