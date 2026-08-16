@@ -1,0 +1,48 @@
+{
+  "family": "${FAMILY}",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "${CPU}",
+  "memory": "${MEMORY}",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "connector",
+      "image": "${IMAGE}",
+      "essential": true,
+      "stopTimeout": 60,
+      "environment": [
+        { "name": "ENVIRONMENT", "value": "${ENV_WORD}" },
+        { "name": "CLIENT_NAME", "value": "${CLIENT_NAME}" },
+        { "name": "CLIENT_TIMEZONE", "value": "${CLIENT_TIMEZONE}" },
+        { "name": "MONGO_DB_ATLAS", "value": "true" },
+        { "name": "MONGO_USAGE_DB_NAME", "value": "${MONGO_USAGE_DB_NAME}" },
+        { "name": "LOG_LEVEL", "value": "${LOG_LEVEL}" },
+        { "name": "LOG_FORMAT", "value": "${LOG_FORMAT}" },
+        { "name": "TRACE_INGESTION_INTERVAL_SECONDS", "value": "${TRACE_INGESTION_INTERVAL_SECONDS}" },
+        { "name": "TRACE_INGESTION_BATCH_SIZE", "value": "${TRACE_INGESTION_BATCH_SIZE}" },
+        { "name": "TRACE_INGESTION_QUIET_PERIOD_SECONDS", "value": "${TRACE_INGESTION_QUIET_PERIOD_SECONDS}" },
+        { "name": "REPROCESS_INTERVAL_SECONDS", "value": "${REPROCESS_INTERVAL_SECONDS}" },
+        { "name": "LANGWATCH_CLICKHOUSE_URL", "value": "${LANGWATCH_CLICKHOUSE_URL}" },
+        { "name": "LANGWATCH_CLICKHOUSE_USER", "value": "default" },
+        { "name": "LANGWATCH_CLICKHOUSE_DATABASE", "value": "langwatch" }
+      ],
+      "secrets": [
+        { "name": "MONGO_DB_HOST", "valueFrom": "${MONGO_SECRET_ARN}:MONGO_DB_HOST::" },
+        { "name": "MONGO_DB_USER", "valueFrom": "${MONGO_SECRET_ARN}:MONGO_DB_USER::" },
+        { "name": "MONGO_DB_PASSWORD", "valueFrom": "${MONGO_SECRET_ARN}:MONGO_DB_PASSWORD::" },
+        { "name": "LANGWATCH_PROJECT_ID", "valueFrom": "${SSM_PROJECT_ID_ARN}" },
+        { "name": "LANGWATCH_CLICKHOUSE_PASSWORD", "valueFrom": "${LANGWATCH_SECRET_ARN}:LANGWATCH_CLICKHOUSE_PASSWORD::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "${LOG_GROUP}",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

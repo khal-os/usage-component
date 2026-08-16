@@ -1,0 +1,34 @@
+{
+  "family": "${FAMILY}",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "${CPU}",
+  "memory": "${MEMORY}",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${BACKUP_TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "backup",
+      "image": "${IMAGE}",
+      "essential": true,
+      "environment": [
+        { "name": "MONGO_USAGE_DB_NAME", "value": "${MONGO_USAGE_DB_NAME}" },
+        { "name": "BACKUP_BUCKET", "value": "${BACKUP_BUCKET}" },
+        { "name": "BACKUP_PREFIX", "value": "${CLIENT_NAME}" }
+      ],
+      "secrets": [
+        { "name": "MONGO_DB_HOST", "valueFrom": "${MONGO_SECRET_ARN}:MONGO_DB_HOST::" },
+        { "name": "MONGO_DB_USER", "valueFrom": "${MONGO_SECRET_ARN}:MONGO_DB_USER::" },
+        { "name": "MONGO_DB_PASSWORD", "valueFrom": "${MONGO_SECRET_ARN}:MONGO_DB_PASSWORD::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "${LOG_GROUP}",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
