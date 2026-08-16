@@ -84,7 +84,21 @@ probe() {
 
 # python3, never jq (repo convention). Reads JSON on stdin, prints the
 # expression's value.
-jget() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)" 2>/dev/null; }
+#
+# A failing expression must NOT look like an empty answer: swallowing the
+# exception is how a KeyError became "the certificate does not exist" and
+# "every lifecycle rule is scoped". stdout stays empty so callers behave,
+# but the reason goes to stderr where it is impossible to miss.
+jget() {
+  python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print($1)
+except Exception as err:
+    print('  jget failed — ' + type(err).__name__ + ': ' + str(err), file=sys.stderr)
+"
+}
 
 # ════════════════════════════════════════════════════════════════════════════
 # GATE — exactly what the CD role can already see, so it adds NO permission
@@ -247,7 +261,7 @@ audit_s3() {
   # written, with nothing linking cause to effect.
   if probe "lifecycle configuration on ${bucket}" s3api get-bucket-lifecycle-configuration --bucket "${bucket}" --output json; then
     local unfiltered
-    unfiltered="$(printf '%s' "${AWS_OUT}" | jget "','.join(r['ID'] for r in d['Rules'] if r.get('Status')=='Enabled' and not (r.get('Filter',{}) or {}).get('Prefix'))")"
+    unfiltered="$(printf '%s' "${AWS_OUT}" | jget "','.join(r.get('ID','<unnamed rule>') for r in d['Rules'] if r.get('Status')=='Enabled' and not (r.get('Filter',{}) or {}).get('Prefix'))")"
     if [ -n "${unfiltered}" ]; then
       bad "lifecycle rule(s) not scoped to a prefix: ${unfiltered}"
       note "an unfiltered rule also expires config/<client>/ — which the LangWatch box refetches on every start, so the box stops booting"
@@ -425,7 +439,7 @@ audit_network_edge() {
         && ok "the :443 default action is a fixed response, not a forward" \
         || bad "the :443 default action is not a fixed response — an unknown Host reaches an app instead of a 404"
     else
-      warn "no :443 listener yet (expected while the certificate waits on DNS delegation)"
+      warn "no :443 listener yet — the certificate exists but nothing serves TLS"
     fi
     printf '%s' "${listeners}" | grep -q '"Port": 80' && ok "HTTP :80 listener present (redirect)" || warn "no :80 listener"
   fi
@@ -445,17 +459,33 @@ audit_network_edge() {
     fi
   done
 
-  # PENDING_VALIDATION is a STATE, not a failure: a client-owned zone means
-  # someone else pastes the CNAME, and onboarding parks here for days.
+  # PENDING_VALIDATION is a STATE, not a failure: an externally-held zone
+  # means someone else pastes the CNAME, and onboarding parks here for days.
+  #
+  # Two calls on purpose. list-certificates returns a SUMMARY — on some CLI
+  # versions nothing but the ARN and the domain — so reading Status off it
+  # raised KeyError, which the checker turned into "no certificate exists".
+  # A lookup failure read as an absence is the exact mistake the
+  # AccessDenied discipline exists to prevent, so the status now comes from
+  # describe-certificate, where the API contract guarantees it.
   if aws_try acm list-certificates --output json; then
-    local cert_status
-    cert_status="$(printf '%s' "${AWS_OUT}" | jget "next((c['Status'] for c in d['CertificateSummaryList'] if c.get('DomainName','').endswith('${BASE_DOMAIN}')),'')")"
-    case "${cert_status}" in
-      ISSUED) ok "certificate for *.${BASE_DOMAIN} ISSUED" ;;
-      PENDING_VALIDATION) warn "certificate for *.${BASE_DOMAIN} is PENDING_VALIDATION — waiting on the DNS owner, not broken" ;;
-      "") bad "no ACM certificate covering ${BASE_DOMAIN} in ${TENANT_REGION}" ;;
-      *) bad "certificate for *.${BASE_DOMAIN} is ${cert_status}" ;;
-    esac
+    local cert_arn cert_status
+    cert_arn="$(printf '%s' "${AWS_OUT}" | jget "next((c['CertificateArn'] for c in d['CertificateSummaryList'] if c.get('DomainName') in ('*.${BASE_DOMAIN}','${BASE_DOMAIN}')),'')")"
+    if [ -z "${cert_arn}" ]; then
+      bad "no ACM certificate covering ${BASE_DOMAIN} in ${TENANT_REGION}"
+    elif probe "certificate ${cert_arn##*/}" acm describe-certificate --certificate-arn "${cert_arn}" --output json; then
+      cert_status="$(printf '%s' "${AWS_OUT}" | jget "d['Certificate']['Status']")"
+      case "${cert_status}" in
+        ISSUED)
+          ok "certificate for *.${BASE_DOMAIN} ISSUED"
+          note "${cert_arn}"
+          ;;
+        PENDING_VALIDATION)
+          warn "certificate for *.${BASE_DOMAIN} is PENDING_VALIDATION — waiting on the DNS owner, not broken"
+          ;;
+        *) bad "certificate for *.${BASE_DOMAIN} is ${cert_status}" ;;
+      esac
+    fi
   fi
 }
 
