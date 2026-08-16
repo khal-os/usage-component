@@ -11,10 +11,17 @@
 name: fleet-heartbeat
 
 on:
-  schedule:
-    # 09:00 UTC ≈ 06:00 America/Sao_Paulo — a digest waiting at the start of
-    # the working day, not a 3am page.
-    - cron: "0 9 * * *"
+  # The nightly cron is OFF until the first account is fully deployed, and
+  # turning it on is a step of the onboarding runbook. Until then every run
+  # would be red for a true reason — the services genuinely do not exist yet
+  # — and a leg that is always red is a leg nobody reads, which is the same
+  # argument that keeps IMAGES_ENABLED false on a tenant whose account is
+  # not bootstrapped. Uncomment when the first account goes live:
+  #
+  # schedule:
+  #   # 09:00 UTC ≈ 06:00 America/Sao_Paulo — a digest waiting at the start
+  #   # of the working day, not a 3am page.
+  #   - cron: "0 9 * * *"
   workflow_dispatch:
 
 permissions:
