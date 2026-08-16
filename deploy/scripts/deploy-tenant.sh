@@ -233,6 +233,12 @@ if [ "${CONN_RUNNING}" = "0" ]; then
       --query 'tasks[0].{stopped:stoppedReason,container:containers[0].reason}' \
       --output json >&2 || true
   fi
+  # stoppedReason answers "it exited", never "why" — the first real run of
+  # this warning printed `Essential container in task exited` with a null
+  # container reason, while the actual cause (no LANGWATCH_PROJECT_ID) sat
+  # in the log the whole time. The CD role already reads this log group.
+  echo "  last lines from $(log_group connector):" >&2
+  aws logs tail "$(log_group connector)" --since 5m 2>/dev/null | tail -15 >&2 || true
 fi
 
 # services-stable is ALSO satisfied by a circuit-breaker ROLLBACK — verify
@@ -254,5 +260,3 @@ for svc in api connector scheduler; do
 done
 
 say "deploy of ${CLIENT} @ ${SHA} complete"
-say "REMINDER: set IMAGE_SHA=${SHA} in ${TENANT_FILE} and commit"
-say "          (preflight warns on the drift; the file is what --register-only would ship)"
