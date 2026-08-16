@@ -115,6 +115,18 @@ Print any of them: `bash deploy/scripts/naming.sh <client> name_service api`.
     and lands STAMPED with a real R$; `GET /billing/summary` ≡ Σ stamped
     costs; a backup object appears in S3 after the next 07:00 UTC run (or
     run one now — Jobs below); the alarm fires on a forced failure.
+11. **Turn the nightly heartbeat on** — for the FIRST account only; after
+    that it already covers every tenant file. The cron in
+    `.github/workflows/fleet-heartbeat.yml` ships commented out, because
+    before an account is deployed every run would be red for a true reason,
+    and a leg that is always red is a leg nobody reads. Two things to do,
+    in this order:
+    - add the repo secret `FLEET_HEARTBEAT_SLACK_WEBHOOK` (a Slack incoming
+      webhook for the channel ops watches), then run the workflow once by
+      hand from the Actions tab and confirm the digest arrives;
+    - uncomment the `schedule:` block and merge.
+
+    Do not uncomment it first: the run fails without the webhook, by design.
 
 ### When someone else owns the DNS zone
 
