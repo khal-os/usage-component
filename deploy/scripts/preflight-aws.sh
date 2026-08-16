@@ -585,23 +585,25 @@ PY
   done
 }
 
+# What is deployed is a question ECS answers with authority: the latest
+# revision carries the image tag. The tenant file used to carry it too and
+# preflight warned when the two diverged — which made a PR mandatory after
+# every deploy, and guaranteed the drift it was warning about, because
+# people forget. Two sources for one fact always diverge; that is the same
+# argument that removed Terraform (decision 165). The tenant file's
+# IMAGE_SHA is now only a seed for the first --register-only, when no task
+# definition exists yet to be asked.
 audit_image_sha() {
-  sect "Deployed SHA"
-  local declared; declared="$(tget IMAGE_SHA)"
-  if [ -z "${declared}" ]; then
-    warn "the tenant file records no IMAGE_SHA — expected before the first deploy, a gap afterwards"
-    return
-  fi
-  if probe "api task definition" ecs describe-task-definition --task-definition "$(name_service api)" --output json; then
-    local running
-    running="$(printf '%s' "${AWS_OUT}" | jget "d['taskDefinition']['containerDefinitions'][0]['image'].rsplit(':',1)[-1]")"
-    if [ "${running}" = "${declared}" ]; then
-      ok "the tenant file's IMAGE_SHA matches the latest api revision"
-    else
-      warn "tenant file says ${declared:0:12}, latest api revision runs ${running:0:12} — someone deployed without recording it"
-      note "the file IS what the next --register-only would ship, so this drift re-deploys the wrong image"
+  sect "Deployed image"
+  local family
+  for family in api connector scheduler backup; do
+    if probe "task definition $(name_service "${family}")" ecs describe-task-definition --task-definition "$(name_service "${family}")" --output json; then
+      local image revision
+      image="$(printf '%s' "${AWS_OUT}" | jget "d['taskDefinition']['containerDefinitions'][0]['image'].rsplit(':',1)[-1]")"
+      revision="$(printf '%s' "${AWS_OUT}" | jget "str(d['taskDefinition']['revision'])")"
+      ok "${family} revision ${revision} runs ${image:0:12}"
     fi
-  fi
+  done
 }
 
 # ════════════════════════════════════════════════════════════════════════════
