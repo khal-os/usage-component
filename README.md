@@ -146,6 +146,26 @@ make down CLIENT=<name>        # stop (volumes preserved)
 make ps
 ```
 
+### On AWS
+
+The commands above drive a compose stack. A tenant deployed to its own AWS
+account is driven by `deploy/tenants/<client>.env` instead — its identity,
+capacity and store addresses, and the input to the single naming formula in
+`deploy/scripts/naming.sh`. Full procedure in `deploy/RUNBOOK-AWS.md`; the
+contract with whoever creates the infrastructure is
+`deploy/AWS-INFRA-HANDOFF.md`.
+
+```bash
+make aws-preflight CLIENT=<name>              # read-only audit of the infra contract (onboarding step 0)
+make aws-user-data CLIENT=<name>              # the LangWatch EC2 user-data, handed to infra once
+make aws-register  CLIENT=<name> SHA=<sha>    # register the 4 task-def families; touches no service
+make aws-deploy    CLIENT=<name> SHA=<sha>    # gate + roll; rollback is the same command, older SHA
+```
+
+CD creates nothing but container images, task-definition revisions and
+config artifacts — every other AWS resource is pre-created by infra and only
+ever asserted here. There is no Terraform in this repo (decision 155).
+
 **Dead-lettered traces.** A trace that fails ingestion is parked in the
 `ingest_failures` collection (the batch continues; the worker logs the
 backlog count each cycle when it is non-zero). Each row carries the
