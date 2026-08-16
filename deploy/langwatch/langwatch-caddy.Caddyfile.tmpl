@@ -1,5 +1,7 @@
-# Embed proxy in front of LangWatch — rendered by terraform, fetched from S3
-# by langwatch-bootstrap.service, bind-mounted into the `caddy` container.
+# Embed proxy in front of LangWatch — rendered by deploy-tenant.sh, published
+# to s3://<backups-bucket>/config/<client>/, fetched from there by
+# langwatch-bootstrap.service on every start, bind-mounted into `caddy`.
+# The only placeholder is ${embed_origin}.
 #
 # WHY THIS EXISTS. LangWatch 3.5.0 hardcodes two things that make it
 # unembeddable, and exposes no configuration for either:

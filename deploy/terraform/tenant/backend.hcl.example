@@ -1,7 +1,0 @@
-# cp backend.hcl.example backend.hcl (gitignored), ONE PER TENANT — the key
-# names the client:
-bucket       = "<state-bucket-name>"
-key          = "usage-component/tenants/<client>.tfstate"
-region       = "<region>"
-encrypt      = true
-use_lockfile = true
