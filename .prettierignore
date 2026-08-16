@@ -1,6 +1,10 @@
 node_modules
 dist
 coverage
+# Agent worktrees: each holds a full copy of packages/, so prettier was
+# checking the tree four times over — and reading files another checkout is
+# mid-way through rewriting, which fails the push gate at random.
+.claude
 package-lock.json
 demo-data
 docs
