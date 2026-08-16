@@ -53,7 +53,7 @@ sect() { printf '\n%s▸%s %s%s%s\n' "${C_H}" "${C_R}" "${C_B}" "$1" "${C_R}"; }
 # "cannot verify" is its own failure, never a pass.
 AWS_OUT=""
 AWS_ERR=""
-aws_try() { # 0 = ok · 1 = absent/other error · 2 = denied
+aws_try() { # 0 = ok · 1 = absent/other error · 2 = denied · 3 = CLI too old
   local errfile rc=0
   errfile="$(mktemp)"
   AWS_OUT="$(aws "$@" 2>"${errfile}")" || rc=1
@@ -61,6 +61,15 @@ aws_try() { # 0 = ok · 1 = absent/other error · 2 = denied
   rm -f "${errfile}"
   if [ "${rc}" -ne 0 ] && printf '%s' "${AWS_ERR}" | grep -qiE 'accessdenied|not authorized|unauthorizedoperation|explicit deny'; then
     return 2
+  fi
+  # A CLI that predates the service answers with its usage banner, not with
+  # an API error — and that read as "the resource does not exist". Third
+  # incarnation of the same defect: after permissions and after parsing,
+  # this is the tool being too old to ask (decision 166). It cost a real
+  # false negative: an EventBridge Scheduler schedule that existed, was
+  # ENABLED, and was reported absent by a CLI from 2021.
+  if [ "${rc}" -ne 0 ] && printf '%s' "${AWS_ERR}" | grep -qiE "argument (command|operation): Invalid choice|Invalid choice, valid choices are"; then
+    return 3
   fi
   return "${rc}"
 }
@@ -76,6 +85,9 @@ probe() {
     2) bad "cannot verify ${label} — the credentials lack the permission"
        note "$(printf '%s' "${AWS_ERR}" | head -1)"
        return 2 ;;
+    3) bad "cannot verify ${label} — this aws CLI is too old to know that service"
+       note "installed: $(aws --version 2>&1 | head -1) — upgrade and re-run"
+       return 3 ;;
     *) bad "${label}: absent or unreadable"
        note "$(printf '%s' "${AWS_ERR}" | head -1)"
        return 1 ;;
