@@ -68,7 +68,7 @@ carries each row with its exact settings; this is the shape.
 | **Edge** | ALB · :80 redirect listener · :443 listener with a **fixed-404 default** · target groups `-api` and `-lw` · host-header rules · A-alias records |
 | **IAM (workload)** | `-execution` · `-task` · `-backup-task` · `-backup-schedule` · `-langwatch` + instance profile · `-dlm` |
 | **Config stores** | 2 Secrets Manager secrets (`…/mongo`, `…/langwatch`), created EMPTY · 2 SSM parameters · 4 log groups |
-| **LangWatch host** | EC2 instance (user-data supplied by us) · private hosted zone `internal.usage` + `clickhouse` record · TG attachment · DLM policy |
+| **LangWatch host** | EC2 instance (user-data supplied by us) · private hosted zone `<client>.internal.usage` + `clickhouse` record · TG attachment · DLM policy · **root volume ENCRYPTED**, tagged for DLM |
 | **Workloads** | 3 ECS services · EventBridge Scheduler for the nightly backup · 2 alarms · 1 EventBridge failure rule |
 
 ### Settings that are not defaults, and why
@@ -102,6 +102,13 @@ carries each row with its exact settings; this is the shape.
   and never transit git, a pipeline, or any document.
   `LANGWATCH_CREDENTIALS_SECRET` must never change after first boot — stored
   credentials become undecryptable. Mark it non-rotatable.
+- **The LangWatch root volume is encrypted, and its private zone carries the
+  client** (`<client>.internal.usage`). The volume holds every trace with full
+  unmasked content, and EBS cannot be encrypted after creation — the fix is
+  snapshot, copy, restore, swap, on a live box. The zone is scoped by VPC
+  association rather than by name, so a shared `internal.usage` leaves N
+  identically-named zones in one account: associate the wrong one and a
+  client's connector resolves another client's ClickHouse.
 - **The api target group's health path is `/api/v1/docs`.** It is the one
   route that stays open with session auth on (decision 103); any other path
   401s and targets never go healthy.
