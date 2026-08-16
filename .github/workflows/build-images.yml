@@ -1,8 +1,12 @@
-# Decision 140: images are built ONCE per git SHA, pushed to ECR, and every
-# tenant runs the same tag. IMMUTABLE tags — rollback is redeploying an
-# older SHA, never rebuilding. Auth is OIDC (no stored AWS keys): the role
-# is the foundation's `github_ci_role_arn` output, wired as the
-# AWS_DEPLOY_ROLE_ARN repository variable (AWS_REGION likewise).
+# Decision 140: images are built ONCE per git SHA and every tenant runs the
+# same tag. IMMUTABLE tags — rollback is redeploying an older SHA, never
+# rebuilding. Decision 153: with one AWS account per client, "once" now means
+# built once and PUSHED to N registries — never rebuilt per account, or the
+# same commit would produce different bytes per client.
+#
+# The account list is deploy/tenants/*.env (AWS_ACCOUNT_ID in each), so
+# onboarding a client is committing a file. No per-client GitHub variable
+# exists: every role ARN is computed by naming.sh.
 name: build-images
 
 on:
@@ -18,42 +22,28 @@ jobs:
   build-push:
     runs-on: ubuntu-latest
     strategy:
-      # One failing leg must not cancel the others (the deploy script's
-      # ECR-existence guard is what decides deployability of a SHA).
+      # One failing image must not cancel the others; the deploy script's
+      # ECR-existence guard is what decides deployability of a SHA.
       fail-fast: false
       matrix:
-        # image = ECR repo/tag; dockerfile = docker/<name>.Dockerfile.
-        # usage-db-backup carries no platform- prefix on purpose: it is
-        # the backup of the tenant's usage DB, not of the platform.
+        # image = the naming.sh image axis; dockerfile = docker/<name>.Dockerfile.
+        # db-backup carries no platform- prefix on purpose: it is the backup
+        # of the tenant's usage DB, not of the platform.
         include:
-          - { image: khal/namastex/production/usage-module, dockerfile: module }
-          - { image: khal/namastex/production/usage-connector, dockerfile: connector }
-          - { image: khal/namastex/production/usage-db-backup, dockerfile: usage-db-backup }
+          - { image: module, dockerfile: module }
+          - { image: connector, dockerfile: connector }
+          - { image: db-backup, dockerfile: usage-db-backup }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Login to ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
-
-      - name: Build and push ${{ matrix.image }}:${{ github.sha }}
+      - name: Build ${{ matrix.image }} once
         env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-        run: |
-          IMAGE="$REGISTRY/${{ matrix.image }}:${{ github.sha }}"
-          # Immutable tags: if this SHA is already pushed (workflow rerun),
-          # rebuilding it would be refused — skip instead.
-          if aws ecr describe-images \
-              --repository-name "${{ matrix.image }}" \
-              --image-ids imageTag="${{ github.sha }}" >/dev/null 2>&1; then
-            echo "SHA already in ECR — nothing to do (immutable tags)"
-            exit 0
-          fi
-          docker build -f docker/${{ matrix.dockerfile }}.Dockerfile -t "$IMAGE" .
-          docker push "$IMAGE"
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: docker build -f "docker/${DOCKERFILE}.Dockerfile" -t "local-build:${GITHUB_SHA}" .
+
+      # No configure-aws-credentials here: that action assumes ONE role, and
+      # this step assumes one per tenant account from a single OIDC token.
+      - name: Push to every enabled tenant account
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: bash deploy/scripts/ecr-push-fleet.sh "$IMAGE" "local-build:${GITHUB_SHA}" "$GITHUB_SHA"

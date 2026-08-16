@@ -271,6 +271,329 @@ else
   bad "scripts/packaging-check.mjs ausente ou inválido"
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════
+# F-I · a fábrica AWS. Tudo abaixo roda SEM conta nenhuma: `aws` é um stub
+# no PATH. É de propósito — o que se prova aqui é que o portão RECUSA um
+# contrato quebrado, e nenhuma conta de verdade fica quebrada de propósito
+# para servir de fixture. As três violações testadas (0/100, desiredCount,
+# família ausente) são exatamente as que não geram erro nenhum em produção.
+# ═══════════════════════════════════════════════════════════════════════════
+
+TDIR="${STUBS}/tenants"
+AWSFIX="${STUBS}/awsfix"
+mkdir -p "$TDIR" "$AWSFIX"
+
+# O stub do `aws`: despacha por "<serviço> <operação>", responde com o
+# arquivo de fixture correspondente e registra TODA chamada, para que os
+# testes possam afirmar o que foi (e o que não foi) chamado.
+cat > "${STUBS}/aws" <<'AWSSTUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AWS_STUB_LOG"
+key="${1}_${2}"
+[ -f "${AWS_STUB_DIR}/${key}.deny" ] && {
+  echo "An error occurred (AccessDeniedException) when calling the ${2} operation: not authorized to perform ${1}:${2}" >&2
+  exit 254
+}
+[ -f "${AWS_STUB_DIR}/${key}.txt" ]  && { cat "${AWS_STUB_DIR}/${key}.txt";  exit 0; }
+[ -f "${AWS_STUB_DIR}/${key}.json" ] && { cat "${AWS_STUB_DIR}/${key}.json"; exit 0; }
+echo "An error occurred (ResourceNotFoundException) when calling the ${2} operation" >&2
+exit 254
+AWSSTUB
+chmod +x "${STUBS}/aws"
+
+tenant_file() { # <slug> [<linha extra>…] — o restante vem do example.env
+  local slug="$1"; shift
+  sed -e "s/^CLIENT_NAME=.*/CLIENT_NAME=${slug}/" \
+      -e "s/^AWS_ACCOUNT_ID=.*/AWS_ACCOUNT_ID=111122223333/" \
+      -e "s#^MONGO_SECRET_ARN=.*#MONGO_SECRET_ARN=arn:aws:secretsmanager:sa-east-1:111122223333:secret:khal/${slug}/prod/usage/mongo-AbCdEf#" \
+      -e "s#^LANGWATCH_SECRET_ARN=.*#LANGWATCH_SECRET_ARN=arn:aws:secretsmanager:sa-east-1:111122223333:secret:khal/${slug}/prod/usage/langwatch-AbCdEf#" \
+      -e "s/^BASE_DOMAIN=.*/BASE_DOMAIN=${slug}.khal.ai/" \
+      -e "s/^IMAGE_SHA=.*/IMAGE_SHA=/" \
+      deploy/tenants/example.env > "${TDIR}/${slug}.env"
+  local extra
+  for extra in "$@"; do printf '%s\n' "$extra" >> "${TDIR}/${slug}.env"; done
+}
+
+naming() { TENANT_DIR="$TDIR" bash deploy/scripts/naming.sh "$@" 2>&1; }
+
+# ---------------------------------------------------------------------------
+case_ "F · naming.sh: UMA fórmula, e recusa em vez de truncar"
+# ---------------------------------------------------------------------------
+# O log group errado sobreviveu meses porque nada compara o nome calculado
+# com o esperado; é isso que esta lista literal faz. Roda contra o
+# example.env de verdade, no diretório de verdade.
+expect_example() { # <função+args> <esperado>
+  local got
+  # shellcheck disable=SC2086 # $1 carrega função + argumentos, é para dividir
+  got="$(bash deploy/scripts/naming.sh example $1 2>&1)" || true
+  if [[ "$got" == "$2" ]]; then ok "example: $1 → $2"; else bad "example: $1 → '$got' (esperado '$2')"; fi
+}
+expect_example "name_base"                "khal-example-prod-usage"
+expect_example "name_service api"         "khal-example-prod-usage-api"
+expect_example "name_service connector"   "khal-example-prod-usage-connector"
+expect_example "name_role execution"      "khal-example-prod-usage-execution"
+expect_example "name_sg workers"          "khal-example-prod-usage-workers"
+expect_example "ecr_repo module"          "khal-example-prod-usage-module"
+expect_example "ecr_repo db-backup"       "khal-example-prod-usage-db-backup"
+expect_example "secret_id mongo"          "khal/example/prod/usage/mongo"
+expect_example "ssm_param langwatch-capacity" "/khal/example/prod/usage/langwatch-capacity"
+expect_example "log_group api"            "/khal/example/prod/usage/api"
+expect_example "hostname_api"             "api.example.khal.ai"
+expect_example "env_word"                 "production"
+
+# As quatro recusas. Cada uma já custou (ou custaria) um deploy na conta
+# errada, um nome truncado num '-' final, ou duas identidades no mesmo
+# arquivo.
+refuses() { # <descrição> <cliente> <padrão esperado no erro>
+  local out rc=0
+  out="$(naming "$2" name_base)" || rc=$?
+  if [[ $rc -ne 0 && "$out" == *"$3"* ]]; then ok "recusa: $1"
+  else bad "NÃO recusou: $1 (saída: ${out:0:120})"; fi
+}
+
+tenant_file thirteenchars   # 13 caracteres — khal-…-prod-usage-api daria 33
+refuses "slug de 13 caracteres" thirteenchars "2-12 chars"
+tenant_file mismatch
+sed -i 's/^CLIENT_NAME=.*/CLIENT_NAME=outrocliente/' "${TDIR}/mismatch.env"
+refuses "CLIENT_NAME diferente do nome do arquivo" mismatch "but the file is"
+tenant_file noenv
+sed -i '/^ENVIRONMENT=/d' "${TDIR}/noenv.env"
+refuses "ENVIRONMENT ausente" noenv "declares no ENVIRONMENT"
+tenant_file wordyenv
+sed -i 's/^ENVIRONMENT=.*/ENVIRONMENT=production/' "${TDIR}/wordyenv.env"
+refuses "ENVIRONMENT=production (a grafia do CONTAINER, não da AWS)" wordyenv "use prod or hml"
+refuses "tenant inexistente" naoexiste "no tenant file"
+
+# ---------------------------------------------------------------------------
+case_ "G · task definitions: renderizadas do template, nunca clonadas"
+# ---------------------------------------------------------------------------
+tenant_file smoke
+SMOKE_SHA=$(printf 'a%.0s' {1..40})
+render() { TENANT_DIR="$TDIR" bash deploy/scripts/render-taskdef.sh smoke "$1" "$SMOKE_SHA" 2>&1 || true; }
+
+for fam in api connector scheduler backup; do
+  out="$(render "$fam")"
+  if python3 -c "import json,sys; json.loads(sys.stdin.read())" <<< "$out" 2>/dev/null; then
+    ok "template ${fam} renderiza JSON válido"
+  else
+    bad "template ${fam} não renderiza JSON válido: $(head -2 <<< "$out")"
+    continue
+  fi
+  CHECK="$out" python3 - "$fam" <<'PY' || bad "conteúdo do template inesperado"
+import json, os, sys
+fam = sys.argv[1]
+d = json.loads(os.environ["CHECK"])
+c = d["containerDefinitions"][0]
+want_name = {"api": "api", "connector": "connector", "scheduler": "scheduler", "backup": "backup"}[fam]
+want_repo = {"api": "module", "connector": "connector", "scheduler": "module", "backup": "db-backup"}[fam]
+assert d["family"] == f"khal-smoke-prod-usage-{fam}", d["family"]
+assert c["name"] == want_name, c["name"]
+assert c["image"].endswith(f"khal-smoke-prod-usage-{want_repo}:" + "a" * 40), c["image"]
+assert c["logConfiguration"]["options"]["awslogs-group"] == f"/khal/smoke/prod/usage/{fam}", c
+assert all(s["valueFrom"].startswith("arn:aws:") for s in c["secrets"]), c["secrets"]
+# O que cada família carrega de específico e ninguém percebe se sumir.
+if fam == "connector":
+    assert c["stopTimeout"] == 60, "sem stopTimeout: um lote é morto no meio"
+    assert any(s["name"] == "LANGWATCH_PROJECT_ID" for s in c["secrets"])
+if fam == "scheduler":
+    assert c["command"] == ["node", "dist/main/jobs/run-billing-close-scheduler.js"], c.get("command")
+if fam == "backup":
+    assert d["taskRoleArn"].endswith("khal-smoke-prod-usage-backup-task"), d["taskRoleArn"]
+PY
+done
+ok "quatro famílias renderizadas com nome, repo, log group e valueFrom esperados"
+
+# CORS vazio no tenant file vira o domínio do próprio cliente — derivado,
+# nunca uma lista mantida à mão.
+if render api | grep -q '"value": "https://\*\.smoke\.khal\.ai"'; then
+  ok "CORS_ALLOWED_ORIGINS vazio deriva https://*.<BASE_DOMAIN>"
+else
+  bad "CORS vazio não derivou o domínio do cliente"
+fi
+
+# Um valor obrigatório em branco é recusado — não renderizado vazio.
+tenant_file blanktz
+sed -i 's/^CLIENT_TIMEZONE=.*/CLIENT_TIMEZONE=/' "${TDIR}/blanktz.env"
+if TENANT_DIR="$TDIR" bash deploy/scripts/render-taskdef.sh blanktz api "$SMOKE_SHA" >/dev/null 2>&1; then
+  bad "renderizou com CLIENT_TIMEZONE em branco"
+else
+  ok "recusa renderizar com um valor obrigatório em branco"
+fi
+
+# ---------------------------------------------------------------------------
+case_ "H · preflight --gate: pega o que a AWS não reclama"
+# ---------------------------------------------------------------------------
+export AWS_STUB_DIR="$AWSFIX" AWS_STUB_LOG="${STUBS}/aws-calls.log"
+: > "$AWS_STUB_LOG"
+
+services_json() { # <min> <max> <desired> — os três do connector
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, sys
+minp, maxp, desired = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+def svc(name, dc, count, extra=None):
+    s = {"serviceName": f"khal-smoke-prod-usage-{name}", "status": "ACTIVE",
+         "desiredCount": count, "deploymentConfiguration": dc,
+         "networkConfiguration": {"awsvpcConfiguration": {"subnets": ["subnet-a", "subnet-b"]}},
+         "loadBalancers": []}
+    if extra:
+        s.update(extra)
+    return s
+api_dc = {"minimumHealthyPercent": 100, "maximumPercent": 200,
+          "deploymentCircuitBreaker": {"enable": True, "rollback": True}}
+worker_dc = {"minimumHealthyPercent": minp, "maximumPercent": maxp}
+print(json.dumps({"services": [
+    svc("api", api_dc, 1, {"loadBalancers": [{"targetGroupArn": "arn:aws:elasticloadbalancing:::x"}]}),
+    svc("connector", worker_dc, desired),
+    svc("scheduler", {"minimumHealthyPercent": 0, "maximumPercent": 100}, 1),
+], "failures": []}))
+PY
+}
+printf '{"taskDefinition":{"status":"ACTIVE","containerDefinitions":[{"image":"x:%s"}]}}\n' "$SMOKE_SHA" \
+  > "${AWSFIX}/ecs_describe-task-definition.json"
+
+gate() { TENANT_DIR="$TDIR" PATH="${STUBS}:${PATH}" bash deploy/scripts/preflight-aws.sh --gate smoke 2>&1; }
+
+services_json 0 100 1 > "${AWSFIX}/ecs_describe-services.json"
+if out="$(gate)"; then ok "conta conforme: o portão sai 0"; else bad "conta conforme reprovada: $(grep '✖' <<< "$out" | head -3)"; fi
+
+# ESTE é o teste. 100/200 é o DEFAULT da AWS, não gera erro nenhum, e põe
+# dois connectors vivos ao mesmo tempo — dois leitores do mesmo watermark,
+# que não tem lease. Os traces da janela entram duplicados no arquivo
+# permanente e nada, em lugar nenhum, reclama.
+services_json 100 200 1 > "${AWSFIX}/ecs_describe-services.json"
+out="$(gate)" && bad "connector em 100/200 PASSOU no portão" || {
+  if grep -q 'MUST be 0/100' <<< "$out"; then ok "connector em 100/200 reprova e o erro nomeia o singleton"
+  else bad "reprovou, mas sem nomear a violação de singleton"; fi
+}
+
+services_json 0 100 2 > "${AWSFIX}/ecs_describe-services.json"
+out="$(gate)" && bad "connector com desiredCount=2 PASSOU no portão" || {
+  grep -q 'desiredCount = 2' <<< "$out" && ok "desiredCount=2 reprova (dois escritores PERMANENTES)" \
+    || bad "reprovou sem nomear o desiredCount"
+}
+
+services_json 0 100 1 > "${AWSFIX}/ecs_describe-services.json"
+rm -f "${AWSFIX}/ecs_describe-task-definition.json"
+out="$(gate)" && bad "família de task-def ausente PASSOU no portão" || \
+  ok "família ausente reprova ANTES do deploy (em vez de morrer no meio)"
+printf '{"taskDefinition":{"status":"ACTIVE","containerDefinitions":[{"image":"x:%s"}]}}\n' "$SMOKE_SHA" \
+  > "${AWSFIX}/ecs_describe-task-definition.json"
+
+# AccessDenied != ausente. Um buraco de permissão lido como "recurso não
+# existe" manda o operador procurar no lugar errado.
+touch "${AWSFIX}/ecs_describe-services.deny"
+out="$(gate)" && bad "AccessDenied passou como verde" || {
+  grep -q 'cannot verify' <<< "$out" && ok "AccessDenied vira 'cannot verify', não 'ausente'" \
+    || bad "AccessDenied relatado como recurso ausente"
+}
+rm -f "${AWSFIX}/ecs_describe-services.deny"
+
+# ---------------------------------------------------------------------------
+case_ "I · --register-only: registra as 4 famílias e não toca em serviço"
+# ---------------------------------------------------------------------------
+: > "$AWS_STUB_LOG"
+echo 'arn:aws:ecs:sa-east-1:111122223333:task-definition/khal-smoke-prod-usage-api:7' \
+  > "${AWSFIX}/ecs_register-task-definition.txt"
+echo '{"imageDetails":[{}]}' > "${AWSFIX}/ecr_describe-images.json"
+
+if TENANT_DIR="$TDIR" PATH="${STUBS}:${PATH}" \
+   bash deploy/scripts/deploy-tenant.sh --register-only smoke "$SMOKE_SHA" > "${STUBS}/register.log" 2>&1; then
+  ok "--register-only saiu 0"
+else
+  bad "--register-only falhou: $(tail -3 "${STUBS}/register.log")"
+fi
+REG=$(grep -c '^ecs register-task-definition' "$AWS_STUB_LOG" || true)
+UPD=$(grep -c '^ecs update-service' "$AWS_STUB_LOG" || true)
+[[ "$REG" == "4" ]] && ok "registrou exatamente 4 famílias" || bad "registrou ${REG} famílias (esperado 4)"
+[[ "$UPD" == "0" ]] && ok "não chamou update-service nenhuma vez" || bad "chamou update-service ${UPD}x num --register-only"
+
+# Nada é clonado da revisão atual: se fosse, uma task def de placeholder
+# criada pela infra se propagaria para sempre.
+if grep -q '^ecs describe-task-definition' "$AWS_STUB_LOG"; then
+  bad "--register-only leu a revisão atual — o template deixou de ser a fonte"
+else
+  ok "nenhum describe-task-definition: a revisão vem do template, não do que já está lá"
+fi
+
+# ---------------------------------------------------------------------------
+case_ "J · --fleet: o dígito nomeia a conta ruim e o webhook ausente reprova"
+# ---------------------------------------------------------------------------
+# Não é a auditoria completa que se prova aqui (isso exigiria fixture de
+# ~20 serviços da AWS): é o CAMINHO do heartbeat — itera os tenants, assume
+# o papel de auditoria em cada um, e o dígito carrega a violação de cada
+# conta. O POST no Slack em si não é exercitado; o que se pin a é a recusa
+# quando o webhook falta (139: heartbeat que não alcança ninguém é o
+# silêncio que ele existe para evitar).
+# Só ficam os dois tenants VÁLIDOS: os arquivos de recusa do caso F fariam
+# o `tenant_load` morrer na primeira iteração, que é o comportamento certo
+# mas não é o que se mede aqui. `smoke` é o que casa com a fixture dos
+# serviços (100/200); `outra` responde serviço ausente.
+tenant_file outra
+rm -f "${TDIR}/thirteenchars.env" "${TDIR}/mismatch.env" "${TDIR}/noenv.env" \
+      "${TDIR}/wordyenv.env" "${TDIR}/blanktz.env"
+# Sem token OIDC (que é o caso de um operador rodando na mão), o --fleet
+# audita a conta em que as credenciais JÁ estão e recusa as outras pelo
+# nome. Não existe assume-role aqui de propósito: o papel de auditoria é
+# confiado só pelo provedor OIDC, então assumir a partir de outro papel é
+# negado pela política de confiança (decisão 159).
+printf '111122223333\n' > "${AWSFIX}/sts_get-caller-identity.txt"
+services_json 100 200 1 > "${AWSFIX}/ecs_describe-services.json"
+
+FLEET_OUT="$(TENANT_DIR="$TDIR" PATH="${STUBS}:${PATH}" \
+  bash deploy/scripts/preflight-aws.sh --fleet 2>&1 || true)"
+
+if grep -q 'fleet heartbeat — 2 account(s)' <<< "$FLEET_OUT"; then
+  ok "o dígito cobre as duas contas dos tenant files"
+else
+  bad "o dígito não iterou os dois tenants: $(grep -c . <<< "$FLEET_OUT") linhas"
+fi
+if grep -qE '^:x: smoke — .*MUST be 0/100' <<< "$FLEET_OUT"; then
+  ok "a linha da conta nomeia a violação (o singleton em 100/200)"
+else
+  bad "a linha da conta não nomeia a violação: $(grep '^:x:' <<< "$FLEET_OUT" | head -1)"
+fi
+if grep -q 'nowhere to report' <<< "$FLEET_OUT"; then
+  ok "sem FLEET_HEARTBEAT_SLACK_WEBHOOK a rodada FALHA em vez de postar no vazio"
+else
+  bad "webhook ausente não reprovou a rodada"
+fi
+
+# Conta que as credenciais correntes não alcançam tem que ser RECUSADA pelo
+# nome — nunca contada como verde. Um dígito que omite a conta que não deu
+# pra auditar é exatamente o silêncio que o heartbeat existe para evitar.
+tenant_file outraconta
+sed -i 's/^AWS_ACCOUNT_ID=.*/AWS_ACCOUNT_ID=999988887777/' "${TDIR}/outraconta.env"
+FLEET_OUT2="$(TENANT_DIR="$TDIR" PATH="${STUBS}:${PATH}" \
+  bash deploy/scripts/preflight-aws.sh --fleet 2>&1 || true)"
+if grep -qE '^:x: outraconta — .*(999988887777|111122223333)' <<< "$FLEET_OUT2"; then
+  ok "conta inalcançável aparece no dígito com o motivo, não como verde"
+else
+  bad "conta inalcançável não foi nomeada: $(grep '^:x: outraconta' <<< "$FLEET_OUT2" | head -1)"
+fi
+rm -f "${TDIR}/outraconta.env"
+
+# ---------------------------------------------------------------------------
+case_ "K · scripts de deploy: sintaxe e nenhum nome literal sobrevivendo"
+# ---------------------------------------------------------------------------
+for s in deploy/scripts/*.sh deploy/langwatch/langwatch-bootstrap.sh; do
+  bash -n "$s" 2>/dev/null || bad "erro de sintaxe em ${s}"
+done
+ok "bash -n limpo em deploy/scripts/*.sh"
+
+# A fórmula mora em UM arquivo. Um `khal-<algo>` escrito à mão em qualquer
+# outro script é a segunda cópia que o naming.sh existe para não ter.
+HARDCODED="$(grep -rnE '"khal-[a-z]|khal-\$\{?CLIENT|usage-main|usage-\$\{CLIENT' \
+  deploy/scripts/ .github/workflows/ --include='*.sh' --include='*.yml' \
+  | grep -v 'naming.sh' || true)"
+if [[ -z "$HARDCODED" ]]; then
+  ok "nenhum nome de recurso literal fora do naming.sh"
+else
+  bad "nome de recurso montado fora do naming.sh"
+  sed 's/^/    | /' <<< "$HARDCODED"
+fi
+
+unset AWS_STUB_DIR AWS_STUB_LOG
+
 echo
 if (( FAILURES == 0 )); then
   printf '\033[32m✔\033[0m deploy smoke: tudo verde\n'

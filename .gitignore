@@ -15,13 +15,13 @@ loadtest/*.archive.gz
 # Mongo backups (make backup) — client data, never committed
 backups/
 
-# Terraform: state is remote (S3), local artifacts and real backend/tfvars
-# configs name live infrastructure — never committed
+# Terraform is gone (decision 155): CD ships images, task-definition
+# revisions and config artifacts into stores infra pre-created, and
+# preflight-aws.sh is the single checker. These patterns stay only so a
+# stray local .terraform/ from an old checkout is never committed.
 **/.terraform/
 *.tfstate
 *.tfstate.*
-deploy/terraform/**/backend.hcl
-deploy/terraform/**/*.auto.tfvars
 
 # jest --json output from test:ci — dashboard input, never committed
 packages/*/jest-results.json

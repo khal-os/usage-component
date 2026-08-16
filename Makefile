@@ -22,6 +22,12 @@
 #   make deploy-smoke                           # regressão dos scripts de deploy (sem docker)
 #   make test                                   # as três suítes (core+module+connector) + typecheck
 #
+# AWS (deploy/tenants/<cliente>.env — deploy/RUNBOOK-AWS.md):
+#   make aws-preflight CLIENT=hapvida           # auditoria read-only do contrato de infra (passo 0)
+#   make aws-user-data CLIENT=hapvida           # o user-data da EC2 LangWatch, para a infra criar a instância
+#   make aws-register  CLIENT=hapvida           # registra as 4 famílias de task-def, sem tocar em serviço
+#   make aws-deploy    CLIENT=hapvida SHA=<sha> # gate + roll dos serviços; rollback = SHA anterior
+#
 # Continuous ingestion: once LANGWATCH_PROJECT_ID is set in the client env
 # (scripts/3-onboard-langwatch.sh writes it), the trace-ingestion-worker
 # sidecar syncs automatically via direct ClickHouse reads — the ONLY real
@@ -34,6 +40,10 @@
 .DEFAULT_GOAL := help
 
 ENVFILE = clients/$(CLIENT).env
+# The AWS side's per-tenant file (decision 149) — identity, capacity and the
+# store addresses every khal-* name is computed from. Separate from ENVFILE
+# on purpose: clients/ is the compose world, deploy/tenants/ is the AWS one.
+TENANTFILE = deploy/tenants/$(CLIENT).env
 # `env -u`: compose interpolation ranks the OS environment ABOVE --env-file,
 # so an exported LANGWATCH_PROJECT_ID (e.g. from onboarding a LangWatch
 # instance) would leak into every stack — and an exported
@@ -87,7 +97,7 @@ JOB = $(COMPOSE_PROD) run --rm --no-deps api node
 # prod form otherwise.
 SYNC_COMPOSE = $(if $(wildcard demo-data/$(CLIENT)/*.json),$(COMPOSE_DEV),$(COMPOSE_PROD))
 
-.PHONY: help build test up up-prod down logs ps backup migrate migrate-up seed-prices sync price reprocess rebuild-filter-counters rebuild-session-summaries billing-close billing-reopen deploy-smoke require-client
+.PHONY: help build test up up-prod down logs ps backup migrate migrate-up seed-prices sync price reprocess rebuild-filter-counters rebuild-session-summaries billing-close billing-reopen deploy-smoke require-client require-tenant aws-preflight aws-register aws-user-data aws-deploy
 
 help:
 	@grep -E '^#( |$$)' Makefile | sed 's/^# \?//'
@@ -162,9 +172,37 @@ backup: require-client
 
 # ---- AWS factory (decision 140 — deploy/RUNBOOK-AWS.md) ----
 
-# Roll one tenant to an image SHA: registers new task-def revisions, runs
-# the migrations gate, then rolls the services. Rollback = older SHA.
-aws-deploy: require-client
+# The AWS-side twin of require-client. It must NOT reuse require-client:
+# that guard demands a local clients/<name>.env, which AWS-only work does
+# not have and should not need (decision 147 recorded the trap). Same
+# filename==CLIENT_NAME rule, different directory — a mismatch here would
+# compute another tenant's resource names and target another account.
+require-tenant:
+	@test "$(origin CLIENT)" = "command line" || { echo "pass CLIENT=<name> explicitly on the make command line (tenant file: deploy/tenants/<name>.env)"; exit 1; }
+	@test -f "$(TENANTFILE)" || { echo "missing $(TENANTFILE) — copy deploy/tenants/example.env and fill it in"; exit 1; }
+	@grep -qx "CLIENT_NAME=$(CLIENT)" "$(TENANTFILE)" || { echo "$(TENANTFILE) must contain exactly CLIENT_NAME=$(CLIENT) — a mismatch computes another tenant's AWS names"; exit 1; }
+
+# Read-only audit of the handoff contract for one tenant: every resource
+# infra pre-created, with the settings the pipeline and the data depend on.
+# Step 0 of onboarding, and safe to run any day.
+aws-preflight: require-tenant
+	bash deploy/scripts/preflight-aws.sh $(CLIENT)
+
+# Bootstrap leg: render and register all four task-definition families so
+# infra can create the services on real task definitions. Touches no
+# service. SHA defaults to the tenant file's IMAGE_SHA.
+aws-register: require-tenant
+	bash deploy/scripts/deploy-tenant.sh --register-only $(CLIENT) $(SHA)
+
+# The one artifact infra needs from us to create the LangWatch instance.
+# Rendered once, per tenant — cloud-init runs user-data once per instance.
+aws-user-data: require-tenant
+	@bash deploy/scripts/render-user-data.sh $(CLIENT)
+
+# Roll one tenant to an image SHA: preflight gate, renders new task-def
+# revisions, runs the migrations gate, rolls the services, publishes the
+# LangWatch config bundle. Rollback = older SHA.
+aws-deploy: require-tenant
 	@test -n "$(SHA)" || { echo "uso: make aws-deploy CLIENT=<cliente> SHA=<git-sha>"; exit 1; }
 	bash deploy/scripts/deploy-tenant.sh $(CLIENT) $(SHA)
 

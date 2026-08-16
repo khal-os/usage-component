@@ -50,6 +50,17 @@ jobs:
         uses: docker://rhysd/actionlint:1.7.12
         with:
           args: -color
+      # deploy/ is excluded from eslint, prettier, lint-staged and
+      # spec-check, and nothing in this repo ran shellcheck at all — so the
+      # scripts that GUARD every AWS deploy were the least-checked code in
+      # the tree. Scoped to deploy/scripts at error severity: the older
+      # scripts/*.sh would drown it in warnings on day one, and a lint that
+      # is always noisy is a lint nobody reads.
+      - name: shellcheck (deploy scripts)
+        uses: docker://koalaman/shellcheck-alpine:v0.10.0
+        with:
+          entrypoint: sh
+          args: -c "shellcheck --severity=error deploy/scripts/*.sh deploy/langwatch/*.sh"
 
   typecheck:
     name: Typecheck

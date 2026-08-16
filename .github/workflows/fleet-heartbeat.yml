@@ -1,0 +1,42 @@
+# Nightly read-only audit of EVERY tenant account, posted to Slack
+# (decision 154). Two things multiply with one account per client — drift,
+# and silence — and this catches both: it re-runs the full preflight in each
+# account and reports a digest whether or not anything is wrong.
+#
+# It is a READ path by construction. No cross-account publish, no shared
+# write dependency: it assumes each account's khal-<client>-<env>-usage-audit
+# role, which holds Describe/Get/List and deliberately NO
+# secretsmanager:GetSecretValue — the fleet run checks that secrets exist,
+# never their keys.
+name: fleet-heartbeat
+
+on:
+  schedule:
+    # 09:00 UTC ≈ 06:00 America/Sao_Paulo — a digest waiting at the start of
+    # the working day, not a 3am page.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # No configure-aws-credentials step, and no bootstrap role: each
+      # account's audit role is trusted by the GitHub OIDC provider and by
+      # nothing else, so there is no identity to assume FROM (decision 159).
+      # The script exchanges one web-identity token per account itself —
+      # the same pattern ecr-push-fleet.sh uses for the push role.
+      #
+      # A heartbeat that cannot reach anyone is exactly the silence it
+      # exists to prevent, so the script fails when the webhook is missing
+      # rather than posting into the void (decision 139).
+      - name: Audit every tenant and post the digest
+        env:
+          FLEET_HEARTBEAT_SLACK_WEBHOOK: ${{ secrets.FLEET_HEARTBEAT_SLACK_WEBHOOK }}
+        run: bash deploy/scripts/preflight-aws.sh --fleet

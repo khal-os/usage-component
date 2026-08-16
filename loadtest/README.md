@@ -87,6 +87,42 @@ docker exec loadtest-mongo mongosh --quiet --eval \
 docker compose -p loadtest down -v --remove-orphans && rm -f clients/loadtest.env
 ```
 
+## On a deployed tenant (the per-account onboarding gate)
+
+The compose run above proves the SHAPE of the pipeline. It does not prove
+anything about a client's account — and decision 140's gate (queue grows,
+drains, **zero loss**) is what stands between believing the stack holds and
+having measured it. The Hetzner PoC died exactly here: the ingest queue grew
+into an OOM with no signal (decision 139). With one account per client that
+is N chances to repeat it, so **every new account runs this once, on its own
+sizing, before real traffic**, and the operator records the pass/fail line.
+
+Same generator (`otlp-load-gen.mjs` is endpoint-agnostic — point
+`OTLP_ENDPOINT` at `https://langwatch.<BASE_DOMAIN>`), and the same watcher:
+
+```bash
+./loadtest/watch-pipeline.sh --aws <client>
+```
+
+It runs the SAME queries — the bullmq `llen`/`zcard` on redis and the
+`trace_summaries`/`stored_spans` counts on ClickHouse — on the LangWatch
+instance through `ssm send-command` rather than a local `docker exec`, and
+reads the Mongo count from the module API's `GET /traces` total instead of
+mongosh. Same columns, same verdict rules, so the verdict section above stays
+valid. The interval widens to ~10s for the send-command round trip, which is
+irrelevant over a 60s burst.
+
+Needs `ssm:SendCommand` on the operator's credentials and nothing new on the
+box (the SSM agent is already there for Session Manager). Export
+`USAGE_API_TOKEN` if the tenant has session auth on.
+
+`deploy/tenants/example.env` ships at **t3.xlarge with 2 workers and 3g
+ClickHouse** — the sizing this procedure calls for — precisely so a new
+client does not start below the line its own gate requires. Resizing the box
+is an infra action (see `deploy/RUNBOOK-AWS.md` § LangWatch EC2 operations);
+bump the capacity knobs in the tenant file alongside, or a bigger box with
+the same container limits gains nothing.
+
 ## Caveats
 
 - Single-host runs are conservative: the generator, LangWatch, ClickHouse and
