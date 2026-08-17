@@ -98,6 +98,11 @@ Print any of them: `bash deploy/scripts/naming.sh <client> name_service api`.
    API auth is session-JWT (khal-auth) and holds no secret at all: set
    `KHAL_AUTH_URL` in the tenant file and the api task gets it plus
    `KHAL_TENANT`. Empty = API OPEN, a declared posture, warned at boot.
+   **When usage goes up BEFORE the tenant's khal-auth exists (hapvida did,
+   16/08 → 17/08), put "close the API" on the day-2 list**: fill
+   `KHAL_AUTH_URL=https://auth.<client-domain>` and `make aws-deploy` — the
+   posture is declared, but nothing forces the return trip, and hapvida served
+   `GET /api/v1/traces` anonymously for a day.
    The EC2 needs nothing: `langwatch-bootstrap.service` retries every 30s
    until the secret exists, then brings the stack up itself.
 4. **`make aws-preflight CLIENT=<client>`** — the gate. It reports every
@@ -222,6 +227,15 @@ overrides.
   unembeddable in the Khal desktop. The proxy rewrites both. To change which
   desktop may frame it, set `LANGWATCH_EMBED_ORIGIN` in the tenant file →
   `make aws-deploy` (which re-publishes the Caddyfile) → restart (below).
+  **The Khal desktop sits on the APEX** (`https://<client-domain>`), and
+  `https://*.<client-domain>` does NOT match the apex — the value (and the
+  default the deploy script derives) must list both, space-separated:
+  `https://hapvida.khal.ai https://*.hapvida.khal.ai`. Wildcard-only was the
+  "refused to connect" of 17/08. **A Caddyfile change needs the proxy
+  restarted, not `caddy reload`**: the Caddyfile is a read-only bind mount (a
+  changed file does not make compose recreate the container) and the admin
+  API is off (`admin off`, no :2019 to post to). `langwatch-bootstrap.sh`
+  restarts `langwatch-embed-proxy` after every `compose up` for exactly this.
   **Never patch the app container by hand:** that is exactly what this
   replaced, and those edits die silently on the next container recreation.
 - Capacity retune (incl. load-testing): edit the tenant file →
