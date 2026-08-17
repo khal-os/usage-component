@@ -254,7 +254,7 @@ anyone is the exact silence it exists to prevent.
 
 ## Backups & restore
 
-- `s3://khal-<client>-<env>-usage-backups-<account>-<region>-an/backups/<client>/<timestamp>.archive.gz`
+- `s3://$(BACKUP_BUCKET do tenant file)/backups/<client>/<timestamp>.archive.gz` — a forma padrão do nome é `khal-<client>-<env>-usage-backups-<account>`, mas o que vale é o nome declarado: bucket S3 não se renomeia, então quem criou escolheu
   — Glacier at 35 days, expire ~13 months; bucket versioned. **The lifecycle
   rule MUST be scoped to the `backups/` prefix**: unfiltered it also ages out
   `config/`, which the LangWatch box re-fetches on every service start, and
