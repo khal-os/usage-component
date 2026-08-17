@@ -416,11 +416,21 @@ audit_network_edge() {
   # NEVER filter by CIDR: tenant VPCs deliberately share 10.80.0.0/16
   # (decision 142), so a CIDR filter silently returns another tenant's
   # network. Name tag is the only safe selector here.
-  if probe "VPC $(name_thing vpc)" ec2 describe-vpcs --filters "Name=tag:Name,Values=$(name_thing vpc)" --output json; then
-    local vpc_id
+  # The network is CLIENT level (decision 167). hapvida was built before that
+  # and still carries the component in its tags, so both spellings are
+  # accepted until those tags are corrected — a tag rename is free, but it is
+  # not this script's job to force the window.
+  if probe "VPC $(name_client vpc)" ec2 describe-vpcs \
+      --filters "Name=tag:Name,Values=$(name_client vpc),$(name_base)-vpc" --output json; then
+    local vpc_id vpc_name
     vpc_id="$(printf '%s' "${AWS_OUT}" | jget "d['Vpcs'][0]['VpcId'] if d['Vpcs'] else ''")"
+    vpc_name="$(printf '%s' "${AWS_OUT}" | jget "next((t['Value'] for v in d['Vpcs'] for t in v.get('Tags',[]) if t['Key']=='Name'),'')")"
+    if [ "${vpc_name}" = "$(name_base)-vpc" ]; then
+      warn "VPC is tagged ${vpc_name} — the network belongs to the CLIENT, not to a component (decision 167)"
+      note "rename the Name tag to $(name_client vpc); tags are free to change, unlike SG and ALB names"
+    fi
     if [ -z "${vpc_id}" ]; then
-      bad "no VPC tagged Name=$(name_thing vpc)"
+      bad "no VPC tagged Name=$(name_client vpc)"
     else
       ok "VPC ${vpc_id}"
       # The tenant's stable egress address — what the client's Atlas
@@ -433,10 +443,14 @@ audit_network_edge() {
     fi
   fi
 
-  local alb_arn=""
-  if probe "ALB $(name_base)" elbv2 describe-load-balancers --names "$(name_base)" --output json; then
+  # Same story for the ALB — client level now, but its name is immutable, so
+  # hapvida keeps the old one until someone chooses to recreate it.
+  local alb_arn="" alb_name
+  alb_name="$(name_client_base)"
+  aws_try elbv2 describe-load-balancers --names "${alb_name}" --output json || alb_name="$(name_base)"
+  if probe "ALB ${alb_name}" elbv2 describe-load-balancers --names "${alb_name}" --output json; then
     alb_arn="$(printf '%s' "${AWS_OUT}" | jget "d['LoadBalancers'][0]['LoadBalancerArn']")"
-    ok "ALB $(name_base) — $(printf '%s' "${AWS_OUT}" | jget "d['LoadBalancers'][0]['DNSName']")"
+    ok "ALB ${alb_name} — $(printf '%s' "${AWS_OUT}" | jget "d['LoadBalancers'][0]['DNSName']")"
   fi
 
   if [ -n "${alb_arn}" ] && probe "listeners on $(name_base)" elbv2 describe-listeners --load-balancer-arn "${alb_arn}" --output json; then

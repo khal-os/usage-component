@@ -332,7 +332,11 @@ expect_example "name_base"                "khal-example-prod-usage"
 expect_example "name_service api"         "khal-example-prod-usage-api"
 expect_example "name_service connector"   "khal-example-prod-usage-connector"
 expect_example "name_role execution"      "khal-example-prod-usage-execution"
-expect_example "name_sg workers"          "khal-example-prod-usage-workers"
+# Nível CLIENTE (decisão 167): a rede é do cliente, não do componente —
+# três eixos, sem componente nenhum.
+expect_example "name_client_base"         "khal-example-prod"
+expect_example "name_client vpc"          "khal-example-prod-vpc"
+expect_example "name_sg workers"          "khal-example-prod-workers"
 expect_example "ecr_repo module"          "khal-example-prod-usage-module"
 expect_example "ecr_repo db-backup"       "khal-example-prod-usage-db-backup"
 expect_example "secret_id mongo"          "khal/example/prod/usage/mongo"

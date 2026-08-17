@@ -30,6 +30,9 @@ still says whose it is.
 ```
 org=khal · client=<slug> · env=prod|hml · component=usage
 
+client level      khal-<client>-<env>-<thing>            three axes
+component level   khal-<client>-<env>-<component>-<thing>  four axes
+
 resource names   khal-<client>-<env>-usage[-<thing>]     hyphens, flat
 store paths      khal/<client>/<env>/usage/<thing>       slashes
 S3 key prefixes  backups/<client>/  ·  config/<client>/
@@ -40,6 +43,21 @@ metric dimension Tenant=<client>
 compose and has no AWS names. The full words `production`/`homolog` appear
 in exactly one place, and it is not an AWS name: the container's own
 `ENVIRONMENT` variable, mapped by the task-def renderer.
+
+**Two levels, and the difference is ownership** (decision 167). The network
+is shared by every app and API the client runs — it is not the usage
+component's. So VPC, subnets, IGW, NAT, route tables, endpoints, security
+groups, the ALB and the ACM certificate take **three axes**,
+`khal-<client>-<env>-<thing>`, with no component: there is none to name, and
+a filler like `shared` would invent one. Everything a single component owns
+alone — cluster, ECR, services, task definitions, secrets, SSM, log groups,
+alarms, its IAM roles, its buckets — takes four.
+
+Target groups stay at component level (`khal-<client>-<env>-usage-api` points
+at the usage api), so the 32-char cap and the slug limit below are unchanged.
+
+⚠ Getting this wrong is not cosmetic: a VPC named for a component invites
+someone to create a SECOND VPC later, because "that one is the usage one".
 
 **Client slugs are capped at 12 characters.** The binding constraint is the
 api target group, `khal-<slug>-prod-usage-api` = 20 + slug, against AWS's
