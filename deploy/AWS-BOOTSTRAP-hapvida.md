@@ -17,8 +17,32 @@ chars, `-lw` = 26, ALB = 23 — all under the 32-char cap.
 
 ---
 
+## Diagrams
+
+`deploy/diagrams/hapvida-prod-topology.drawio` — the whole account drawn in
+the AWS Architecture Icons convention, editable in app.diagrams.net or the
+draw.io VS Code extension. Regenerate with
+`python3 deploy/diagrams/gen-topology-drawio.py`; every identifier in it is
+hapvida's and hardcoded, so it updates rather than gets redrawn.
+
+A rendered version with the full resource inventory lives at
+<https://claude.ai/code/artifact/00393393-bcce-4249-ad54-4954731dba70>
+(private — reachable only by whoever it is shared with).
+
+Both are **snapshots**. `make aws-preflight CLIENT=hapvida` is the live
+answer, and the one to trust when they disagree.
+
+---
+
 ## 0 · Order of operations
 
+0. **DNS first — it is the only step gated on another team.** Two models,
+   and they are MUTUALLY EXCLUSIVE: either an NS record delegates `<client>`
+   to a Route 53 zone in this account, or the records are created directly
+   in whatever provider holds the parent zone. An NS record shadows every
+   record the parent zone holds beneath it, so creating both silently
+   disables the second. hapvida uses the second model (Cloudflare, proxy
+   OFF). Three records: the ACM validation CNAME, `api.` and `langwatch.`.
 1. §A account-level, §B network, §C edge, §D IAM, §E config stores, §F LangWatch host.
 2. **Hand over to us:** account id, region, NAT egress IP, ALB DNS name, confirmation that the two secrets and the SSM params exist.
 3. **We run** `deploy-tenant.sh --register-only hapvida` — registers revision 1 of the four task-definition families (our templates), publishes the LangWatch config bundle to S3 and the capacity JSON to SSM.
@@ -40,7 +64,7 @@ chars, `-lw` = 26, ALB = 23 — all under the 32-char cap.
 | A7 | IAM OIDC provider | `https://token.actions.githubusercontent.com` | audience `sts.amazonaws.com` |
 | A8 | IAM role — CD | `khal-hapvida-prod-usage-github-ci` | trust + policy in §A8 below |
 | A9 | IAM role — read-only audit | `khal-hapvida-prod-usage-audit` | trust + policy in §A9 below (used by the nightly fleet heartbeat) |
-| A10 | ACM certificate | `<domain>` + SAN `*.<domain>` | DNS-validated, status **ISSUED**, in `<region>`. Zone is Hapvida's; if their DNS team owns it, they paste the validation CNAME |
+| A10 | ACM certificate | `*.<domain>` + SAN `<domain>` | DNS-validated in `<region>`. **ONE validation CNAME covers both**, and it is PERMANENT — ACM re-checks it at every automatic renewal, so deleting it after issuance fails the renewal ~13 months later |
 
 ### A8 — `khal-hapvida-prod-usage-github-ci` (the only role CD assumes)
 
@@ -112,10 +136,10 @@ Cross-SG rules as standalone rule resources (not inline).
 | C3 | Listener :443 | cert A10, SSL policy `ELBSecurityPolicy-TLS13-1-2-2021-06`, **default action = fixed response 404**, content-type `application/json`, body `{"error":"unknown host"}` |
 | C4 | Target group | `khal-hapvida-prod-usage-api` — HTTP :3000, `target_type=ip`, VPC B1, health path `/api/v1/docs` matcher 200-399, deregistration delay 30 |
 | C5 | Target group | `khal-hapvida-prod-usage-lw` — HTTP :5560, `target_type=instance`, health `/` matcher 200-399 |
-| C6 | Listener rule prio **100** | host-header `hapvida-api.<domain>` → C4 |
-| C7 | Listener rule prio **101** | host-header `hapvida-langwatch.<domain>` → C5 |
-| C8 | Route53 A (alias) | `hapvida-api.<domain>` → C1 |
-| C9 | Route53 A (alias) | `hapvida-langwatch.<domain>` → C1 |
+| C6 | Listener rule prio **100** | host-header `api.<domain>` → C4 |
+| C7 | Listener rule prio **101** | host-header `langwatch.<domain>` → C5 |
+| C8 | DNS record | `api.<domain>` → C1. **A-alias if the zone is in Route 53; CNAME to the ALB's DNS name if it is anywhere else** — only Route 53 can alias a load balancer |
+| C9 | DNS record | `langwatch.<domain>` → C1, same rule |
 
 If Hapvida's DNS team owns the zone, C8/C9 are two records we hand them
 (name, type A/alias or CNAME to the ALB DNS name).
@@ -156,9 +180,9 @@ Secret **values never** go through infra, git or any pipeline — operator only.
 
 | # | Resource | Setting |
 |---|---|---|
-| F1 | EC2 instance | Name `khal-hapvida-prod-usage-langwatch`; AMI latest **AL2023 x86_64**; type **`t3.xlarge`** (load-test sizing — decision B6); subnet = private [0]; SG B11; instance profile D5; root gp3 **50 GB** tagged `Name=khal-hapvida-prod-usage-langwatch`, `DlmSnapshots=khal-hapvida-prod-usage`; **user-data = the file we hand you** (rendered `langwatch-user-data.sh` — writes `/opt/langwatch/tenant.conf` and the systemd units); **must be created after B6/B7 exist** (first boot installs docker over the NAT); no public IP; no SSH key (SSM Session Manager) |
-| F2 | Route53 **private** hosted zone | `internal.usage`, associated with VPC B1 |
-| F3 | Route53 A record | `clickhouse.internal.usage` → F1 private IP, TTL 60 |
+| F1 | EC2 instance | Name `khal-hapvida-prod-usage-langwatch`; AMI latest **AL2023 x86_64**; type **`t3.xlarge`** (load-test sizing — decision B6); subnet = private [0]; SG B11; instance profile D5; root gp3 **50 GB, ENCRYPTED** (key `aws/ebs` — the volume holds every trace with full unmasked content, and EBS cannot be encrypted after creation), tagged `Name=khal-hapvida-prod-usage-langwatch` and `DlmSnapshots=khal-hapvida-prod-usage` **on the VOLUME, not only the instance** — the DLM policy matches the tag on the volume; **user-data = the file we hand you** (rendered `langwatch-user-data.sh` — writes `/opt/langwatch/tenant.conf` and the systemd units); **must be created after B6/B7 exist** (first boot installs docker over the NAT); no public IP; no SSH key (SSM Session Manager) |
+| F2 | Route53 **private** hosted zone | **`<client>.internal.usage`**, associated with VPC B1. Carries the client on purpose: a private zone is scoped by VPC ASSOCIATION, not by name, so a shared `internal.usage` leaves N identically-named zones in one account — associate the wrong one and a client's connector resolves another client's ClickHouse |
+| F3 | Route53 A record | `clickhouse.<client>.internal.usage` → F1 private IP, TTL 60 |
 | F4 | Target-group attachment | C5 ← F1 on port 5560 |
 | F5 | DLM lifecycle policy | resource type VOLUME, target tag `DlmSnapshots=khal-hapvida-prod-usage`, daily at 06:00, retain 7; role D6 |
 
