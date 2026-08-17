@@ -244,10 +244,6 @@ jobs:
           --from ${{ github.event.pull_request.base.sha }}
           --to ${{ github.event.pull_request.head.sha }}
           --verbose
-      # Squash merges land the PR TITLE as the commit message on main, so
-      # the title must be a conventional commit too. Via env, never inline —
-      # a crafted title must not reach the shell as code.
-      - name: Lint PR title (future squash commit)
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: printf '%s\n' "$PR_TITLE" | npx commitlint --verbose
+      # O título da PR é linted em pr-title.yml, num workflow próprio: este
+      # aqui não escuta `edited`, então uma reclamação sobre o título não
+      # tinha como ser ouvida quando o título fosse corrigido.

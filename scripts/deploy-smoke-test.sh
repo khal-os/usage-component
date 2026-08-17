@@ -342,6 +342,7 @@ expect_example "ecr_repo db-backup"       "khal-example-prod-usage-db-backup"
 expect_example "secret_id mongo"          "khal/example/prod/usage/mongo"
 expect_example "ssm_param langwatch-capacity" "/khal/example/prod/usage/langwatch-capacity"
 expect_example "log_group api"            "/khal/example/prod/usage/api"
+expect_example "bucket_backups"           "khal-example-prod-usage-backups-000000000000"
 expect_example "hostname_api"             "api.example.khal.ai"
 expect_example "env_word"                 "production"
 
@@ -366,6 +367,9 @@ refuses "ENVIRONMENT ausente" noenv "declares no ENVIRONMENT"
 tenant_file wordyenv
 sed -i 's/^ENVIRONMENT=.*/ENVIRONMENT=production/' "${TDIR}/wordyenv.env"
 refuses "ENVIRONMENT=production (a grafia do CONTAINER, não da AWS)" wordyenv "use prod or hml"
+tenant_file nobucket
+sed -i '/^BACKUP_BUCKET=/d' "${TDIR}/nobucket.env"
+refuses "BACKUP_BUCKET ausente (nome de bucket é identidade, não fórmula)" nobucket "declares no BACKUP_BUCKET"
 refuses "tenant inexistente" naoexiste "no tenant file"
 
 # ---------------------------------------------------------------------------
@@ -550,7 +554,7 @@ case_ "J · --fleet: o dígito nomeia a conta ruim e o webhook ausente reprova"
 # serviços (100/200); `outra` responde serviço ausente.
 tenant_file outra
 rm -f "${TDIR}/thirteenchars.env" "${TDIR}/mismatch.env" "${TDIR}/noenv.env" \
-      "${TDIR}/wordyenv.env" "${TDIR}/blanktz.env"
+      "${TDIR}/wordyenv.env" "${TDIR}/blanktz.env" "${TDIR}/nobucket.env"
 # Sem token OIDC (que é o caso de um operador rodando na mão), o --fleet
 # audita a conta em que as credenciais JÁ estão e recusa as outras pelo
 # nome. Não existe assume-role aqui de propósito: o papel de auditoria é

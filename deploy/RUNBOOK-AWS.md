@@ -21,7 +21,15 @@ or subnet **by CIDR silently returns another tenant's network** — filter by
 `vpc-id`; and the `ecs:cluster` condition on the CD role is what fences it
 away from the other two clusters, so it is load-bearing, not decoration.
 Every script that touches AWS asserts it is in the tenant's declared
-account before doing anything. Every other
+account before doing anything.
+
+Since 17/08 the hapvida VPC also hosts the **khal-platform**: five Lambdas in
+the same private subnets and the Web Desktop's ALB in the same public ones.
+That is deliberate — the network belongs to the CLIENT, not to a component
+(decision 167), so a second component injects the existing ids instead of
+creating a second VPC. It changes nothing here except an expectation: a
+`describe-*` in this account returns other components' resources too, and
+`preflight` only ever asserts the names it computes. Every other
 resource is created by infra, once per account, from
 `AWS-INFRA-HANDOFF.md` (or the per-client report `/aws-bootstrap
 <client> <env>` generates). On our side those resources are *asserted*,
@@ -254,7 +262,7 @@ anyone is the exact silence it exists to prevent.
 
 ## Backups & restore
 
-- `s3://khal-<client>-<env>-usage-backups-<account>-<region>-an/backups/<client>/<timestamp>.archive.gz`
+- `s3://$(BACKUP_BUCKET do tenant file)/backups/<client>/<timestamp>.archive.gz` — a forma padrão do nome é `khal-<client>-<env>-usage-backups-<account>`, mas o que vale é o nome declarado: bucket S3 não se renomeia, então quem criou escolheu
   — Glacier at 35 days, expire ~13 months; bucket versioned. **The lifecycle
   rule MUST be scoped to the `backups/` prefix**: unfiltered it also ages out
   `config/`, which the LangWatch box re-fetches on every service start, and

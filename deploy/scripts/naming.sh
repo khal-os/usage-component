@@ -101,8 +101,12 @@ tenant_load() {
   [ -n "${BASE_DOMAIN}" ] || _naming_die \
     "${TENANT_FILE} declares no BASE_DOMAIN — the zone is external, looked up and asserted, never created by us, and never assumed"
 
+  BACKUP_BUCKET="$(tget BACKUP_BUCKET)"
+  [ -n "${BACKUP_BUCKET}" ] || _naming_die \
+    "${TENANT_FILE} declares no BACKUP_BUCKET — a bucket name is identity, not a formula: whoever created it chose the name, and S3 has no rename"
+
   _naming_check_caps
-  export TENANT_FILE CLIENT_NAME ENVIRONMENT AWS_ACCOUNT_ID TENANT_REGION BASE_DOMAIN
+  export TENANT_FILE CLIENT_NAME ENVIRONMENT AWS_ACCOUNT_ID TENANT_REGION BASE_DOMAIN BACKUP_BUCKET
 }
 
 # ── two levels, not one (decision 167) ──────────────────────────────────────
@@ -158,9 +162,15 @@ ecr_registry() { printf '%s.dkr.ecr.%s.amazonaws.com' "${AWS_ACCOUNT_ID}" "${TEN
 
 ecr_image() { printf '%s/%s:%s' "$(ecr_registry)" "$(ecr_repo "${1:?ecr_image <image> <tag>}")" "${2:?ecr_image <image> <tag>}"; }
 
-# S3 appends the account-regional suffix itself — the full name is the
-# prefix plus -<account>-<region>-an (verified against the live bucket).
-bucket_backups() { printf '%s-backups-%s-%s-an' "$(name_base)" "${AWS_ACCOUNT_ID}" "${TENANT_REGION}"; }
+# DECLARED, not computed. This was a formula that ended in -<account>-<region>-an
+# with a comment blaming S3 for the suffix. S3 appends nothing to a general
+# purpose bucket name — the console SUGGESTED that name when the hapvida bucket
+# was created by hand, and the formula was reverse-engineered from the live
+# bucket. The next client, whose bucket comes from CloudFormation or from the
+# infra team, gets a correctly named bucket that the formula would REJECT. The
+# standard shape is khal-<client>-<env>-usage-backups-<account>; the hapvida
+# tail lives in that tenant's file, which is where a chosen name belongs.
+bucket_backups() { printf '%s' "${BACKUP_BUCKET}"; }
 
 topic_alerts() { printf '%s-alerts' "$(name_base)"; }
 

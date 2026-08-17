@@ -59,7 +59,7 @@ answer, and the one to trust when they disagree.
 | A2 | ECR repository | `khal-hapvida-prod-usage-module` | `imageTagMutability=IMMUTABLE`, `scanOnPush=true`, lifecycle: expire beyond **200** images (any tag status) |
 | A3 | ECR repository | `khal-hapvida-prod-usage-connector` | same |
 | A4 | ECR repository | `khal-hapvida-prod-usage-db-backup` | same |
-| A5 | S3 bucket | `khal-hapvida-prod-usage-backups-<account>` | versioning **Enabled**; all four public-access blocks **true**; lifecycle rule **filtered to prefix `backups/`** — 35 d → GLACIER, expire 400 d, noncurrent 35 d, abort incomplete MPU 7 d. **Never an unfiltered rule** — `config/hapvida/*` in the same bucket is refetched by the LangWatch box on every service start; expiring it bricks the box. Prefixes used: `backups/hapvida/`, `config/hapvida/` |
+| A5 | S3 bucket | `khal-hapvida-prod-usage-backups-<account>` — **whatever name you actually create, put it verbatim into `deploy/tenants/hapvida.env` as `BACKUP_BUCKET`**; S3 has no rename, so the name is declared on our side, never computed | versioning **Enabled**; all four public-access blocks **true**; lifecycle rule **filtered to prefix `backups/`** — 35 d → GLACIER, expire 400 d, noncurrent 35 d, abort incomplete MPU 7 d. **Never an unfiltered rule** — `config/hapvida/*` in the same bucket is refetched by the LangWatch box on every service start; expiring it bricks the box. Prefixes used: `backups/hapvida/`, `config/hapvida/` |
 | A6 | SNS topic | `khal-hapvida-prod-usage-alerts` | topic policy: allow `sns:Publish` from `events.amazonaws.com` and `cloudwatch.amazonaws.com` **with condition `aws:SourceAccount = <account>`**; **≥ 1 confirmed email subscription** (ops) — preflight fails without one |
 | A7 | IAM OIDC provider | `https://token.actions.githubusercontent.com` | audience `sts.amazonaws.com` |
 | A8 | IAM role — CD | `khal-hapvida-prod-usage-github-ci` | trust + policy in §A8 below |
@@ -108,6 +108,17 @@ GetPublicAccessBlock`, `sns:GetTopicAttributes ListSubscriptionsByTopic`,
 ---
 
 ## B · Network (decision 142 — the client's own VPC/NAT/ALB)
+
+**This network is the CLIENT's, not this component's** (decision 167). It
+already hosts more than the usage stack: the khal-platform Lambdas run in the
+same private subnets, and the Web Desktop's ALB sits in the same public ones.
+Nothing here may be sized, named or torn down as if `usage` owned it.
+
+Two consequences for whoever reads this later. The names below carry `usage`
+because they were created before decision 167 — a security group's and a load
+balancer's name are IMMUTABLE, so correcting them means recreating, and the
+call was to fix the tags, leave those two, and document the deviation. And a
+second component landing here does NOT get its own VPC: it injects these ids.
 
 | # | Resource | Name / setting |
 |---|---|---|
