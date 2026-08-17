@@ -105,9 +105,36 @@ tenant_load() {
   export TENANT_FILE CLIENT_NAME ENVIRONMENT AWS_ACCOUNT_ID TENANT_REGION BASE_DOMAIN
 }
 
+# ── two levels, not one (decision 167) ──────────────────────────────────────
+# Some resources belong to the CLIENT and not to any component: the network
+# is shared by every app and API the client runs, so calling a VPC
+# khal-<client>-<env>-usage-vpc claims an ownership that does not exist —
+# and the predictable damage is someone creating a SECOND VPC later because
+# "that one is the usage one".
+#
+# Client level takes THREE axes; there is no component to name, and forcing
+# a filler value like `shared` or `net` would invent one.
+#
+#   client level      khal-<client>-<env>-<thing>        VPC, subnets, IGW,
+#                                                        NAT, route tables,
+#                                                        endpoints, SGs, ALB,
+#                                                        the ACM certificate
+#   component level   khal-<client>-<env>-usage-<thing>  everything the usage
+#                                                        component owns alone
+#
+# Target groups stay at COMPONENT level — khal-<client>-<env>-usage-api
+# points at the usage api — so the 32-char cap and the 12-char slug limit
+# are unchanged.
+
 # ── resource names (hyphens) ────────────────────────────────────────────────
 
-# cluster · ALB · the prefix of everything else
+# The client's own prefix — three axes, no component.
+name_client_base() { printf '%s-%s-%s' "${KHAL_ORG}" "${CLIENT_NAME}" "${ENVIRONMENT}"; }
+
+# Anything the CLIENT owns rather than a component: vpc, alb, nat, igw…
+name_client() { printf '%s-%s' "$(name_client_base)" "${1:?name_client <thing>}"; }
+
+# cluster · the prefix of everything the component owns
 name_base() { printf '%s-%s-%s-%s' "${KHAL_ORG}" "${CLIENT_NAME}" "${ENVIRONMENT}" "${KHAL_COMPONENT}"; }
 
 # ECS service · task-definition family · target group   (api connector scheduler backup lw)
@@ -116,8 +143,9 @@ name_service() { printf '%s-%s' "$(name_base)" "${1:?name_service <svc>}"; }
 # IAM role   (execution task backup-task backup-schedule langwatch dlm github-ci audit)
 name_role() { printf '%s-%s' "$(name_base)" "${1:?name_role <role>}"; }
 
-# security group   (alb api workers langwatch atlas)
-name_sg() { printf '%s-%s' "$(name_base)" "${1:?name_sg <sg>}"; }
+# security group   (alb api workers langwatch atlas) — CLIENT level: they
+# gate the client's network, and a platform Lambda will want one too.
+name_sg() { printf '%s-%s' "$(name_client_base)" "${1:?name_sg <sg>}"; }
 
 # anything else that is just BASE-<thing>: vpc, nat, alarms, the backup
 # schedule, the backup-failed rule…
@@ -206,8 +234,9 @@ assert_account() {
 # over-long name is a REFUSAL, at load time, before a single AWS call.
 _naming_check_caps() {
   local n
-  # ALB (32) and the two target groups (32) — the binding constraint.
-  for n in "$(name_base)" "$(name_service api)" "$(name_service lw)"; do
+  # ALB is client level now (32); the two target groups stay component
+  # level and remain the binding constraint on the slug.
+  for n in "$(name_client_base)" "$(name_service api)" "$(name_service lw)"; do
     [ "${#n}" -le 32 ] || _naming_die "computed name '${n}' is ${#n} chars — AWS caps ALB/target-group names at 32"
   done
   # IAM roles (64) — longest is -backup-schedule.
