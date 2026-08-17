@@ -69,4 +69,14 @@ ENV_EOF
 chmod 600 .env
 
 docker compose --env-file .env up -d --remove-orphans
+
+# The Caddyfile is a read-only bind mount: a changed file does NOT make compose
+# recreate the proxy, and Caddy only reads config at start — so a new
+# LANGWATCH_EMBED_ORIGIN never reached the browser (17/08/2026: the desktop on
+# the apex was refused for an hour after the S3 object was already right).
+# `caddy reload` is not an option — the Caddyfile turns the admin API off
+# (`admin off`, no :2019 to post to) — so restart the proxy: sub-second blip,
+# no state in it. Harmless when nothing changed.
+docker compose --env-file .env restart langwatch-embed-proxy \
+  || echo "langwatch-bootstrap: proxy restart failed — Caddyfile applies on next start" >&2
 echo "langwatch-bootstrap: stack up for $CLIENT_NAME"
