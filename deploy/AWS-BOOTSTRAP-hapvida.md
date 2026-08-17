@@ -17,6 +17,23 @@ chars, `-lw` = 26, ALB = 23 — all under the 32-char cap.
 
 ---
 
+## Diagrams
+
+`deploy/diagrams/hapvida-prod-topology.drawio` — the whole account drawn in
+the AWS Architecture Icons convention, editable in app.diagrams.net or the
+draw.io VS Code extension. Regenerate with
+`python3 deploy/diagrams/gen-topology-drawio.py`; every identifier in it is
+hapvida's and hardcoded, so it updates rather than gets redrawn.
+
+A rendered version with the full resource inventory lives at
+<https://claude.ai/code/artifact/00393393-bcce-4249-ad54-4954731dba70>
+(private — reachable only by whoever it is shared with).
+
+Both are **snapshots**. `make aws-preflight CLIENT=hapvida` is the live
+answer, and the one to trust when they disagree.
+
+---
+
 ## 0 · Order of operations
 
 0. **DNS first — it is the only step gated on another team.** Two models,
