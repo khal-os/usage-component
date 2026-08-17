@@ -109,6 +109,17 @@ GetPublicAccessBlock`, `sns:GetTopicAttributes ListSubscriptionsByTopic`,
 
 ## B · Network (decision 142 — the client's own VPC/NAT/ALB)
 
+**This network is the CLIENT's, not this component's** (decision 167). It
+already hosts more than the usage stack: the khal-platform Lambdas run in the
+same private subnets, and the Web Desktop's ALB sits in the same public ones.
+Nothing here may be sized, named or torn down as if `usage` owned it.
+
+Two consequences for whoever reads this later. The names below carry `usage`
+because they were created before decision 167 — a security group's and a load
+balancer's name are IMMUTABLE, so correcting them means recreating, and the
+call was to fix the tags, leave those two, and document the deviation. And a
+second component landing here does NOT get its own VPC: it injects these ids.
+
 | # | Resource | Name / setting |
 |---|---|---|
 | B1 | VPC | `khal-hapvida-prod-usage` — CIDR `10.80.0.0/16`, DNS support + DNS hostnames **on** |
