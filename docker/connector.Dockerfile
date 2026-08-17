@@ -14,7 +14,7 @@
 #   copied in explicitly to keep offline (fixture-backed) sync working —
 #   compose.dev.yml mounts a client's demo fixtures over that directory.
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
@@ -29,7 +29,7 @@ RUN npm run build --workspace=@observability/connector \
   && find packages/core/dist packages/connector/dist \
        \( -name '*.spec.js' -o -name '*.test.js' -o -name '*.map' \) -delete
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production \
     DOTENV_CONFIG_QUIET=true
 WORKDIR /app
