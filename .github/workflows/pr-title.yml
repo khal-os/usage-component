@@ -1,0 +1,39 @@
+# The PR title, linted on its own — because it becomes a commit message.
+#
+# A squash merge lands the PR TITLE on main, so a title that is not a
+# conventional commit puts a non-conforming message in the history that
+# commitlint would have rejected anywhere else.
+#
+# Why this is not a step inside ci.yml, where it started: `pull_request:` with
+# no `types` listens for opened, synchronize and reopened — NOT edited. The job
+# complained about the title and then had no way to hear the title being fixed;
+# the only ways out were an unrelated push or closing and reopening the PR.
+# Listening for `edited` there would re-run the whole suite on every
+# description tweak, so the cheap check moves out and gets the trigger it
+# actually needs.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Via env, never inline — a crafted title must not reach the shell as code.
+      - name: Lint PR title (future squash commit)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | npx commitlint --verbose
