@@ -75,12 +75,12 @@ C_REGION = "#00A4A6"
 
 # ── containment ─────────────────────────────────────────────────────────────
 node("cloud", "AWS Cloud  ·  504557607647  ·  SHARED with usage-main and khal-web-desktop",
-     group("group_aws_cloud", "#232F3E"), 20, 20, 1640, 1180)
+     group("group_aws_cloud", "#232F3E"), 20, 20, 1640, 1400)
 node("region", "Region  ·  sa-east-1  (São Paulo)",
-     group("group_region", C_REGION, dashed=1), 40, 60, 1600, 1120, "cloud")
+     group("group_region", C_REGION, dashed=1), 40, 60, 1600, 1340, "cloud")
 
 node("vpc", "VPC  ·  khal-hapvida-prod-usage-vpc  ·  vpc-0b74286babe62ad81  ·  10.80.0.0/16",
-     group("group_vpc2", C_NET), 30, 50, 1180, 810, "region")
+     group("group_vpc2", C_NET), 30, 50, 1180, 1030, "region")
 
 node("alb", "Application Load Balancer  ·  khal-hapvida-prod-usage\n"
             ":80 → 301  ·  :443 TLS (ACM, ISSUED) default fixed-404  ·  host rules 100 / 101\n"
@@ -88,18 +88,18 @@ node("alb", "Application Load Balancer  ·  khal-hapvida-prod-usage\n"
      note(C_NET, "#F7F3FF"), 30, 40, 1120, 54, "vpc")
 
 node("az1", "Availability Zone  sa-east-1a",
-     group("group_availability_zone", C_REGION, dashed=1), 30, 116, 550, 480, "vpc")
+     group("group_availability_zone", C_REGION, dashed=1), 30, 116, 550, 700, "vpc")
 node("az2", "Availability Zone  sa-east-1b",
-     group("group_availability_zone", C_REGION, dashed=1), 600, 116, 550, 480, "vpc")
+     group("group_availability_zone", C_REGION, dashed=1), 600, 116, 550, 700, "vpc")
 
 node("pub1", "Public subnet  ·  10.80.0.0/24  ·  subnet-04dbf92dc3613f8b7",
      group("group_public_subnet", C_STORAGE, "#F2F8E9"), 16, 36, 518, 130, "az1")
 node("pub2", "Public subnet  ·  10.80.1.0/24  ·  subnet-077134ca9db111d7e",
      group("group_public_subnet", C_STORAGE, "#F2F8E9"), 16, 36, 518, 130, "az2")
 node("prv1", "Private subnet  ·  10.80.10.0/24  ·  subnet-012734b0c52085343",
-     group("group_private_subnet", "#00A4BF", "#EAF6FA"), 16, 182, 518, 282, "az1")
+     group("group_private_subnet", "#00A4BF", "#EAF6FA"), 16, 182, 518, 502, "az1")
 node("prv2", "Private subnet  ·  10.80.11.0/24  ·  subnet-0da44737c1a155aaa",
-     group("group_private_subnet", "#00A4BF", "#EAF6FA"), 16, 182, 518, 282, "az2")
+     group("group_private_subnet", "#00A4BF", "#EAF6FA"), 16, 182, 518, 502, "az2")
 
 # ── in the public subnets ───────────────────────────────────────────────────
 node("nat", "NAT Gateway\nnat-0b499e818c7733537\nEIP 54.233.226.42 (Atlas allowlist)", res("nat_gateway", C_NET),
@@ -123,19 +123,45 @@ node("svccon", "connector · RUNNING\ndesired 1 · 0/100\nSINGLETON", res("farga
 node("svcsch", "scheduler · RUNNING\ndesired 1 · 0/100\nSINGLETON", res("fargate", C_COMPUTE), 328, 44, 44, 44, "ecs")
 node("eni2", "Atlas PrivateLink ENI\n10.80.11.161", res("endpoints", C_DB), 30, 200, 48, 48, "prv2")
 
+# ── a PLATAFORMA, na mesma rede (decisão 167 / ADR-107) ─────────────────────
+# A VPC é do CLIENTE. Desde 17/08 ela hospeda também a khal-platform, que
+# INJETOU estes ids em vez de criar uma segunda rede — que é exatamente o dano
+# que a decisão 167 existe para evitar.
+node("lambdas", "Lambda × 5  ·  khal-platform  ·  arm64 · nodejs22\n"
+                "auth-system  ·  app-register  ·  module-register\n"
+                "connector-register  ·  agent-register\n"
+                "SEM concorrência reservada — quota da conta em 10",
+     note("#B45309", "#FFF7ED"), 130, 250, 360, 92, "prv1")
+node("lambdaeni", "Lambda ENIs\nsg-0f15bdd56089dc747", res("lambda", C_COMPUTE), 30, 262, 48, 48, "prv1")
+
+node("wdecs", "ECS Fargate  ·  cluster khal-hapvida-prod-web-desktop",
+     group("group_security_group", C_COMPUTE, "#FFF6EE"), 20, 300, 480, 130, "prv2")
+node("wdshell", "desktop · RUNNING\nshell + BFF\narm64", res("fargate", C_COMPUTE), 24, 44, 44, 44, "wdecs")
+node("wdauth", "auth · RUNNING\nkhal-auth :4000\nplano HUMANO", res("fargate", C_COMPUTE), 176, 44, 44, 44, "wdecs")
+node("wdnote", "assina com PEM próprio (ADR-108);\no auth-system assina por KMS",
+     note("#CBD5E1", "#FFFFFF"), 300, 46, 170, 44, "wdecs")
+
+node("alb2", "ALB  ·  khal-hapvida-prod-wd\nhapvida.khal.ai → desktop  ·  auth.hapvida.khal.ai → khal-auth\n"
+             "listener 443 · mesmo certificado regional",
+     res("elastic_load_balancing", C_NET), 620, 44, 48, 48, "vpc")
+node("alb2note", "SEGUNDO ALB, de propósito: o do usage pertence ao contrato\n"
+                 "de infra daquele componente e o preflight dele o audita.\n"
+                 "Dois donos num listener compartilhado custa mais que US$ 20/mês.",
+     note("#CBD5E1", "#FFFFFF"), 690, 40, 420, 58, "vpc")
+
 # ── VPC-level endpoints ─────────────────────────────────────────────────────
-node("igw", "Internet Gateway\nigw-08accaed240139631", res("internet_gateway", C_NET), 40, 630, 48, 48, "vpc")
-node("s3ep", "S3 Gateway endpoint\nvpce-0230792e416279458", res("endpoints", C_STORAGE), 300, 630, 48, 48, "vpc")
+node("igw", "Internet Gateway\nigw-08accaed240139631", res("internet_gateway", C_NET), 40, 850, 48, 48, "vpc")
+node("s3ep", "S3 Gateway endpoint\nvpce-0230792e416279458", res("endpoints", C_STORAGE), 300, 850, 48, 48, "vpc")
 node("plink", "Atlas PrivateLink\nvpce-0f5ce96c31e2e8ab8\nSG 1024–65535", res("privatelink", C_DB),
-     560, 630, 48, 48, "vpc")
+     560, 850, 48, 48, "vpc")
 node("sgnote", "Security groups\nalb sg-0d5b26434f6b64bd2 · api sg-0dc125a873f560ab0\n"
                "workers sg-03d81bd8d4a2ba068 · langwatch sg-07ac8fd9551026737\n"
                "atlas sg-0fb4a32493a79f419  (1024–65535, not 27017)",
-     note(C_SEC, "#FEF2F4"), 760, 616, 390, 76, "vpc")
+     note(C_SEC, "#FEF2F4"), 760, 836, 390, 76, "vpc")
 
 # ── regional services, outside the VPC ──────────────────────────────────────
 node("regional", "Regional services — outside the VPC",
-     group("group_security_group", "#232F3E", "#F7F9FB"), 1230, 50, 350, 810, "region")
+     group("group_security_group", "#232F3E", "#F7F9FB"), 1230, 50, 350, 1030, "region")
 
 ry = 44
 for rid, lbl, icon, colour in [
@@ -158,8 +184,18 @@ for rid, lbl, icon, colour in [
      "identity_and_access_management", C_SEC),
     ("r53", "Route 53 public zone — UNUSED, delete\nDNS lives in Cloudflare",
      "route_53", C_NET),
-    ("acm", "ACM certificate — ISSUED\n*.hapvida.khal.ai + apex · to 01/03/2027",
+    ("acm", "ACM × 2 — ISSUED\nsa-east-1: ALB + API GW · us-east-1: CloudFront\n"
+            "ACM não atravessa conta nem região",
      "certificate_manager", C_SEC),
+    ("apigw", "API Gateway × 5 — khal-platform\nHTTP API + authorizer JWT · domínio próprio\n"
+              "issuer ainda no endpoint (fase 1)",
+     "api_gateway", C_NET),
+    ("ddb", "DynamoDB × 5 — khal-platform\numa tabela por componente (ADR-67)\nPITR on · SSE com a CMK do tenant",
+     "dynamodb", C_DB),
+    ("cf", "CloudFront × 3 — as SPAs\nbilling · tracing · agent-anatomy\nS3 privado atrás de OAC",
+     "cloudfront", C_NET),
+    ("kms", "KMS × 2 — khal-platform\nCMK do tenant · chave de assinatura do auth-system\nrotação anual",
+     "key_management_service", C_SEC),
 ]:
     node(rid, lbl, res(icon, colour), 26, ry, 44, 44, "regional")
     ry += 78
@@ -167,15 +203,16 @@ for rid, lbl, icon, colour in [
 # ── outside the account ─────────────────────────────────────────────────────
 node("gha", "GitHub Actions\nkhal-os/usage-component\nOIDC only — no stored keys\n"
             "build-images · deploy-tenant · fleet-heartbeat",
-     note("#5A6B80", "#F4F6F9"), 40, 1230, 330, 84)
+     note("#5A6B80", "#F4F6F9"), 40, 1450, 330, 84)
 node("atlas", "MongoDB Atlas\nproduction-pl-0.7dwf4x.mongodb.net\n"
               "M10 sa-east-1 · Cloud Backup + PIT\nhapvida_machine_db_user → usage_db",
-     note(C_DB, "#FDF2FE"), 420, 1230, 330, 84)
-node("zone", "khal.ai zone — Cloudflare, proxy OFF\n3 CNAMEs: ACM validation (permanent),\n"
-             "api. and langwatch. → the ALB\nNO NS delegation: it would shadow them all",
-     note("#5A6B80", "#F4F6F9"), 800, 1230, 340, 84)
+     note(C_DB, "#FDF2FE"), 420, 1450, 330, 84)
+node("zone", "khal.ai zone — Cloudflare, proxy OFF\n11 CNAMEs: ACM validation (permanent),\n"
+             "api./langwatch. → ALB do usage · apex e auth. → ALB do desktop\n"
+             "5 registers → API GW · 3 SPAs → CloudFront",
+     note("#5A6B80", "#F4F6F9"), 800, 1450, 340, 84)
 node("agents", "Client agent platform\nOTLP → langwatch.hapvida.khal.ai",
-     note("#5A6B80", "#F4F6F9"), 1190, 1230, 300, 84)
+     note("#5A6B80", "#F4F6F9"), 1190, 1450, 300, 84)
 
 # ── flows ───────────────────────────────────────────────────────────────────
 edge("e1", "agents", "alb", "OTLP over :443")
@@ -193,26 +230,32 @@ edge("e10", "s3", "ec2lw", "box refetches config on every start",
      "dashed=1;")
 edge("e11", "nat", "atlas", "egress 54.233.226.42 (allowlist)", "dashed=1;")
 edge("e12", "zone", "acm", "validation CNAME — permanent", "dashed=1;")
+edge("e13", "alb2", "wdshell", "host hapvida.khal.ai")
+edge("e14", "alb2", "wdauth", "host auth.hapvida.khal.ai")
+edge("e15", "lambdas", "ddb", "uma tabela por componente")
+edge("e16", "apigw", "lambdas", "AWS_PROXY")
 
 legend = (
-    "LEGEND    Everything below is LIVE — 58 resources verified by preflight-aws.sh (0 failures).\n"
+    "LEGENDA   Tudo abaixo está NO AR. O usage (58 recursos) é verificado por preflight-aws.sh; a plataforma\n"
+    "(115 recursos) por terraform plan. A REDE É UMA SÓ e é do CLIENTE — a plataforma injetou os ids em vez de\n"
+    "criar uma segunda VPC (decisão 167). Falta o DNS: 11 CNAMEs com o time de infra.\n"
     "Category colours are the AWS Architecture Icons palette: orange compute · purple networking · "
     "green storage · red security · pink management · magenta database.\n"
     "CD may create NOTHING here. It only puts artifacts into stores infra created: images into ECR, "
     "task-definition revisions into ECS, the config bundle into s3://…/config/hapvida/, "
     "the capacity JSON into SSM."
 )
-node("legend", legend, note("#232F3E", "#FFFFFF"), 40, 1350, 1450, 76)
-node("title", "Hapvida · prod — Khal OS usage component\n"
-              "account 504557607647 · sa-east-1 · hapvida.khal.ai · fully deployed 16 Aug 2026",
+node("legend", legend, note("#232F3E", "#FFFFFF"), 40, 1570, 1450, 76)
+node("title", "Hapvida · prod — Khal OS\n"
+              "account 504557607647 · sa-east-1 · hapvida.khal.ai · usage 16/08 · platform 17/08",
      "text;html=1;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#232F3E;",
-     40, 1440, 800, 40)
+     40, 1660, 800, 40)
 
 xml = (
     '<mxfile host="app.diagrams.net" agent="khal-usage-component" version="24.7.17">\n'
     '  <diagram id="hapvida-prod" name="hapvida · prod">\n'
     '    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" '
-    'connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1500" '
+    'connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1720" '
     'math="0" shadow="0">\n'
     '      <root>\n'
     '        <mxCell id="0"/>\n'
