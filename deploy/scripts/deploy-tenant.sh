@@ -177,8 +177,10 @@ CADDY_TMP="$(mktemp)"
 trap 'rm -f "${TASKDEF_TMP}" "${CADDY_TMP}"' EXIT
 # Same default rule as CORS: empty means this client's own domain, which is
 # derivable; a set value is used verbatim. NEVER "*" — this is a
-# frame-ancestors list and a wildcard there is a clickjacking hole.
-TMPL_EMBED_ORIGIN="${EMBED_ORIGIN:-https://*.${BASE_DOMAIN}}" \
+# frame-ancestors list and a wildcard there is a clickjacking hole. The
+# default lists the APEX too: `https://*.<domain>` does not match
+# `https://<domain>`, and the Khal desktop sits on the apex (ADR-107).
+TMPL_EMBED_ORIGIN="${EMBED_ORIGIN:-https://${BASE_DOMAIN} https://*.${BASE_DOMAIN}}" \
   python3 -c '
 import os, string, sys
 with open(sys.argv[1], encoding="utf-8") as fh:
