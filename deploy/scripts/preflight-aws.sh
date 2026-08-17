@@ -547,6 +547,34 @@ audit_workloads() {
     else
       ok "backup schedule targets the revision-less family ARN"
     fi
+
+    # The network block is where a hand-typed schedule dies silently: RunTask
+    # rejects a security group given by NAME or a subnet with a stray space
+    # BEFORE any task exists — so no exit code, no backup-failed event, and
+    # only the backup-missing alarm (already in ALARM since day one) knows.
+    # Incident 2026-08-17 07:00 BRT: first scheduled fire, both defects, zero
+    # backups. Scheduler accepts the ids as typed; only this check reads them.
+    local net_ids bad_id retries
+    net_ids="$(printf '%s' "${AWS_OUT}" | jget "'\n'.join((d['Target']['EcsParameters']['NetworkConfiguration']['awsvpcConfiguration'].get('SecurityGroups') or []) + (d['Target']['EcsParameters']['NetworkConfiguration']['awsvpcConfiguration'].get('Subnets') or []))")"
+    if [ -z "${net_ids}" ]; then
+      bad "backup schedule has no awsvpc network configuration — a Fargate RunTask without one is rejected"
+    else
+      bad_id="$(printf '%s\n' "${net_ids}" | grep -vE '^(sg|subnet)-[0-9a-f]+$' | head -1)"
+      if [ -n "${bad_id}" ]; then
+        bad "backup schedule network config carries '${bad_id}' — RunTask wants ids (sg-…/subnet-…), exact, no names, no spaces"
+      else
+        ok "backup schedule network config is ids only"
+      fi
+    fi
+    # Zero retries turns any transient (ENI, capacity, throttle) into a
+    # skipped night; the archive is the second copy on M10 and the ONLY one
+    # below it (decision 145).
+    retries="$(printf '%s' "${AWS_OUT}" | jget "d['Target'].get('RetryPolicy', {}).get('MaximumRetryAttempts', 0)")"
+    if [ "${retries:-0}" -ge 2 ] 2>/dev/null; then
+      ok "backup schedule retries a failed fire (${retries}×)"
+    else
+      bad "backup schedule MaximumRetryAttempts=${retries:-0} — one transient error is one night without a backup; want ≥ 2"
+    fi
   fi
 
   probe "backup-failed rule $(name_thing backup-failed)" events describe-rule --name "$(name_thing backup-failed)" --output json \

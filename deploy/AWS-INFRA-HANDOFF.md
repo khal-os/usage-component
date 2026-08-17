@@ -111,6 +111,14 @@ carries each row with its exact settings; this is the shape.
 - **Backup schedule targets the REVISION-LESS task-definition ARN**, and its
   role allows `ecs:RunTask` on **both** that ARN and `…:*` — IAM matches the
   ARN as called, so `family:*` alone AccessDenies every fire, silently.
+- **Backup schedule network config: IDS ONLY, and retries ≥ 2.**
+  `awsvpcConfiguration.SecurityGroups` takes `sg-…` ids — never the group's
+  name — and `Subnets` takes exact `subnet-…` ids (no leading space from a
+  copy-paste). Scheduler stores whatever it is given; RunTask rejects it at
+  07:00 BRT with no task, no exit code and no `backup-failed` event — the
+  only signal is a `backup-missing` alarm that has been in ALARM since
+  creation, so it never re-notifies. Set `RetryPolicy.MaximumRetryAttempts`
+  to at least 2 (3 is what hapvida runs). Preflight now fails on both.
 - **ECR tags IMMUTABLE.** Rollback is "redeploy an older SHA"; a mutable tag
   makes that a lie.
 - **Chatbot channel guardrail `AWSDenyAll`.** Chatbot otherwise lets channel
