@@ -1,3 +1,7 @@
+set -e
 # Commit gate: lint + format the STAGED files only (lint-staged re-stages
 # the fixes). Fast by construction — the full suite runs on pre-push and CI.
 npx lint-staged
+
+echo "[pre-commit] config-secrets lint…"
+bash deploy/scripts/check-config-secrets.sh
