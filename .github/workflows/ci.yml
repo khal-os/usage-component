@@ -247,3 +247,12 @@ jobs:
       # O título da PR é linted em pr-title.yml, num workflow próprio: este
       # aqui não escuta `edited`, então uma reclamação sobre o título não
       # tinha como ser ouvida quando o título fosse corrigido.
+
+  # Tracked env/tfvars files carry identifiers, never credentials — the
+  # semantic guard on per-client config (complements the generic scanners).
+  config-secrets:
+    name: Config-secrets lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash deploy/scripts/check-config-secrets.sh
