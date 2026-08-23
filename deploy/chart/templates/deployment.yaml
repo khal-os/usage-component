@@ -1,0 +1,151 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+{{- $health := $svc.health | default dict }}
+{{- $full := include "kos.name" $ctx }}
+{{- $secretName := include "kos.envSecretName" $ctx }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}
+  namespace: {{ include "kos.namespace" $ }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+  {{- /* Reloader ESCOPADO ao Secret deste servico, nunca a forma `auto`: `auto`
+     observaria tambem ConfigMaps e daria dois rollouts por mudanca. E o
+     controller le a annotation do WORKLOAD, nao do pod template. */}}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ $secretName | quote }}
+    khal.ai/git-sha: {{ include "kos.gitSha" (dict "root" $ "name" $name "image" $svc.image) | quote }}
+    {{- with $svc.deploymentAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ required (printf "'%s': replicas e obrigatorio" $name) $svc.replicas }}
+  revisionHistoryLimit: {{ $svc.revisionHistoryLimit | default 3 }}
+  selector:
+    matchLabels:
+      {{- include "kos.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    {{- /* Recreate: singleton SEM lease. Duas replicas do worker de ingestao
+       duplicariam traces (e a fatura); duas do scheduler fechariam o mesmo mes
+       duas vezes. RollingUpdate cria o novo ANTES de matar o velho — que e
+       exatamente a sobreposicao que nao pode existir. */}}
+    {{- if eq ($svc.strategy | default "RollingUpdate") "Recreate" }}
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "kos.labels" $ctx | nindent 8 }}
+      {{- with $svc.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds | default 30 }}
+      securityContext:
+        {{- include "kos.podSecurityContext" $ctx | trim | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "kos.image" (dict "root" $ "name" $name "image" $svc.image) | quote }}
+          imagePullPolicy: IfNotPresent
+          {{- with $svc.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $svc.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $svc.port }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          {{- end }}
+          env:
+            {{- include "kos.env" (dict "svc" $svc) | trim | nindent 12 }}
+            {{- /* Identidade do binario no ar, legivel de dentro do pod. E a
+               mesma string que as lanes de promocao leem do render para medir
+               frescor da branch de origem. */}}
+            - name: GIT_SHA
+              value: {{ include "kos.gitSha" (dict "root" $ "name" $name "image" $svc.image) | quote }}
+          {{- /* Secret materializado pelo ESO a partir dos paths declarados em
+             `secrets:`. O chart nunca renderiza o objeto de segredo em si
+             (CONTRATO §0.2) — so o ExternalSecret que o pede. */}}
+          envFrom:
+            - secretRef:
+                name: {{ $secretName }}
+          {{- with $health.liveness }}
+          livenessProbe:
+            {{- include "kos.probe" (dict "probe" . "port" $svc.port "name" $name) | trim | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            {{- include "kos.probe" (dict "probe" (required (printf "'%s': health.readiness e obrigatorio" $name) $health.readiness) "port" $svc.port "name" $name) | nindent 12 }}
+          resources:
+            {{- include "kos.resources" $ctx | trim | nindent 12 }}
+          securityContext:
+            {{- include "kos.containerSecurityContext" $ctx | trim | nindent 12 }}
+          {{- if or $svc.tmpDir $svc.extraVolumeMounts }}
+          volumeMounts:
+            {{- /* readOnlyRootFilesystem + emptyDir: o processo escreve
+               heartbeat e temporarios em /tmp e mais nada em disco. */}}
+            {{- if $svc.tmpDir }}
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
+            {{- with $svc.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+        {{- range $svc.sidecars }}
+        - name: {{ .name }}
+          image: {{ include "kos.image" (dict "root" $ "name" (printf "%s/%s" $name .name) "image" .image) | quote }}
+          imagePullPolicy: IfNotPresent
+          {{- with .command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .ports }}
+          ports:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .env }}
+          env:
+            {{- range . }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .secrets }}
+          envFrom:
+            - secretRef:
+                name: {{ printf "%s-%s-env" $full .name }}
+          {{- end }}
+          resources:
+            {{- include "kos.resources" (dict "root" $ "name" (printf "%s/%s" $name .name) "svc" .) | trim | nindent 12 }}
+          securityContext:
+            {{- include "kos.containerSecurityContext" (dict "svc" .) | trim | nindent 12 }}
+        {{- end }}
+      {{- if or $svc.tmpDir $svc.extraVolumes }}
+      volumes:
+        {{- if $svc.tmpDir }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ $svc.tmpDirSizeLimit | default "64Mi" }}
+        {{- end }}
+        {{- with $svc.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+{{- end }}
+{{- end }}

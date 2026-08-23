@@ -1,0 +1,105 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DEFAULTS DO CHART — apenas o que e verdade para QUALQUER servico e QUALQUER
+# ambiente. A FORMA (quais servicos existem, portas, probes, envs, secrets) mora
+# em `deploy/values.yaml`; os PINS e o que muda por ambiente moram em
+# `deploy/values-{dev,hml,prod}.yaml`.
+#
+# Por que este arquivo e quase vazio: o Argo aponta `path: deploy/chart` e passa
+# `deploy/values.yaml` + `deploy/values-<env>.yaml` como valueFiles. Repetir a
+# forma aqui criaria uma segunda fonte de verdade que ninguem lembraria de
+# atualizar — e um servico esquecido aqui renderizaria com defaults silenciosos.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Prefixo dos nomes dos objetos. Vazio = sem prefixo: os objetos se chamam
+# exatamente como a chave do servico (`api`, `trace-ingestion-worker`, ...), que
+# e o que o operador digita no `kubectl -n kos-components-dev get deploy api`.
+namePrefix: ""
+
+# Namespace estampado em todo objeto namespaced. Vazio = namespace do release —
+# sob Argo CD, o `destination.namespace` da Application. NUNCA hardcodar aqui
+# (CONTRATO §5): o mesmo chart serve kos-components-dev, -hml e prod.
+namespace: ""
+
+# Labels comuns a todo objeto renderizado (surface/cliente/ambiente). Os valores
+# reais vem de deploy/values.yaml + values-<env>.yaml.
+common:
+  surface: kos
+  client: ""
+  environment: ""
+
+# ── Presets de recursos (CONTRATO §5) ────────────────────────────────────────
+# Um servico declara `preset: S|M|L` OU `resources: {...}`, nunca os dois — a
+# schema reprova o par. Preset existe para que dimensionar um servico novo seja
+# uma decisao de TAMANHO, nao um exercicio de digitar quatro numeros; `resources`
+# existe para o caso raro em que o tamanho nao cabe em nenhuma das tres caixas.
+presets:
+  S:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  M:
+    requests: { cpu: 100m,  memory: 256Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
+  L:
+    requests: { cpu: 250m,  memory: 512Mi }
+    limits:   { cpu: 2000m, memory: 2Gi }
+
+# ── ESO (External Secrets Operator) ──────────────────────────────────────────
+# O chart NUNCA renderiza `kind: Secret` (CONTRATO §0.2). Ele renderiza
+# ExternalSecret; quem materializa o Secret e o ESO, lendo do AWS Secrets
+# Manager. `storeName` e o ClusterSecretStore do CLUSTER (hapvida-dev cobre dev
+# E hml; hapvida-prod cobre prod) — vem do values do ambiente.
+externalSecrets:
+  storeKind: ClusterSecretStore
+  storeName: ""
+  refreshInterval: 1m
+
+# Prefixo dos paths do Secrets Manager DESTE ambiente
+# (ex.: /hapvida/dev/kos/components). Cada servico declara `secrets: [app, mongo]`
+# e o chart concatena. Entrada que ja comeca com "/" passa inteira.
+secretsPathPrefix: ""
+
+# ── Borda ────────────────────────────────────────────────────────────────────
+# IngressGroup do AMBIENTE (um ALB por ambiente, nunca um por app). `certificateArn`
+# NAO existe aqui de proposito: o cert entra por append CSV no Ingress-fonte do
+# grupo, na fase de borda (CONTRATO §3).
+ingressDefaults:
+  className: alb
+  groupName: ""
+  scheme: internet-facing
+  targetType: ip
+  pathType: Prefix
+  path: /
+
+# CIDRs das subnets do ALB do ambiente. A NetworkPolicy de borda so aceita
+# ingress dessas faixas (o ALB em target-type=ip chega com IP das ENIs). Vazio =
+# nenhuma NetworkPolicy de ingress e renderizada (uma policy sem `from` seria um
+# deny total silencioso).
+albSubnetCidrs: []
+
+# Egress extra permitido a TODOS os pods deste chart, alem de DNS e 443.
+# Cada entrada: { cidr | namespace, ports: [{protocol, port}] }.
+extraEgress: []
+
+# Digest placeholder das branches nunca buildadas. Renderizar com ele e ERRO —
+# o chart falha fechado e a lane de promocao nao consegue ler um digest que nao
+# existe. Ver o helper `kos.resolveImage`.
+placeholderDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+# Registro de imagens: nome curto do repositorio ECR -> repositorio + como
+# construir. As lanes leem ISTO (via deploy/services.sh) para montar a matrix de
+# build; o chart usa so `repository`.
+images: {}
+
+# Pins do ambiente: nome da imagem -> { digest, gitSha }. Escrito por
+# deploy/gitops-pin.sh em deploy/values-<env>.yaml. Um servico pode sobrescrever
+# com `image.digest`/`image.gitSha` proprios (nao usamos isso hoje).
+pins: {}
+
+# Servicos (map name -> spec). Ver deploy/values.yaml para a forma completa.
+services: {}
+
+# Jobs de hook (hoje so `migrations`). Ver deploy/values.yaml.
+jobs: {}
+
+# CronJobs (hoje so `backup`). Ver deploy/values.yaml.
+cronjobs: {}

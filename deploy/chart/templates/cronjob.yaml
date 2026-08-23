@@ -1,0 +1,75 @@
+{{- /*
+CronJob — renderizado somente quando `cronjobs.<n>` esta declarado e habilitado.
+`timeZone` explicito (America/Sao_Paulo): sem ele o kube-controller-manager usa
+UTC e "07:00" vira 04:00 no horario do cliente, tres meses depois de ninguem
+olhar.
+`restartPolicy: Never` + `backoffLimit: 0`: o backup falho tem de FALHAR (o
+entrypoint apaga o objeto .tmp e sai 1) — um retry automatico esconderia a falha
+do alarme de 25h que observa a metrica Succeeded.
+*/ -}}
+{{- range $name, $cj := .Values.cronjobs }}
+{{- if $cj.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $cj }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "kos.name" $ctx }}
+  namespace: {{ include "kos.namespace" $ }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+spec:
+  schedule: {{ required (printf "'%s': schedule e obrigatorio" $name) $cj.schedule | quote }}
+  timeZone: {{ required (printf "'%s': timeZone e obrigatorio (senao o cron roda em UTC)" $name) $cj.timeZone | quote }}
+  concurrencyPolicy: {{ $cj.concurrencyPolicy | default "Forbid" }}
+  startingDeadlineSeconds: {{ $cj.startingDeadlineSeconds | default 600 }}
+  successfulJobsHistoryLimit: {{ $cj.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ $cj.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "kos.labels" $ctx | nindent 8 }}
+    spec:
+      backoffLimit: {{ $cj.backoffLimit | default 0 }}
+      activeDeadlineSeconds: {{ required (printf "'%s': activeDeadlineSeconds e obrigatorio" $name) $cj.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "kos.labels" $ctx | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "kos.name" $ctx }}
+          securityContext:
+            {{- include "kos.podSecurityContext" $ctx | trim | nindent 12 }}
+          containers:
+            - name: {{ $name }}
+              image: {{ include "kos.image" (dict "root" $ "name" $name "image" $cj.image) | quote }}
+              imagePullPolicy: IfNotPresent
+              {{- with $cj.command }}
+              command:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              env:
+                {{- include "kos.env" (dict "svc" $cj) | trim | nindent 16 }}
+                - name: GIT_SHA
+                  value: {{ include "kos.gitSha" (dict "root" $ "name" $name "image" $cj.image) | quote }}
+              envFrom:
+                - secretRef:
+                    name: {{ include "kos.envSecretName" $ctx }}
+              resources:
+                {{- include "kos.resources" $ctx | trim | nindent 16 }}
+              securityContext:
+                {{- include "kos.containerSecurityContext" $ctx | trim | nindent 16 }}
+              {{- if $cj.tmpDir }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              {{- end }}
+          {{- if $cj.tmpDir }}
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ $cj.tmpDirSizeLimit | default "64Mi" }}
+          {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,81 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# HML — cluster `hapvida-dev` (conta 701016785827), namespace `kos-components-hml`
+# Branch do ambiente: `homolog` (hoje `eks/homolog`).
+# O pin daqui e escrito pela lane de promocao, que LE o bloco `pins` de
+# `origin/eks/dev:deploy/values-dev.yaml` — mesmo digest, zero rebuild.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+common:
+  environment: hml
+
+externalSecrets:
+  # Mesmo ClusterSecretStore de dev: hapvida-dev e do CLUSTER, e dev e hml
+  # coabitam na conta 701.
+  storeName: hapvida-dev
+
+secretsPathPrefix: /hapvida/hml/kos/components
+
+ingressDefaults:
+  groupName: hapvida-hml
+
+albSubnetCidrs:
+  - 10.70.240.0/24
+  - 10.70.241.0/24
+
+extraEgress:
+  - cidr: 10.70.0.0/16
+    ports:
+      - { protocol: TCP, port: 27017 }
+      - { protocol: TCP, port: 1024, endPort: 65535 }
+
+# ── Pins (ESCRITO POR deploy/gitops-pin.sh — nao editar a mao) ────────────────
+pins:
+  usage-module:
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    gitSha: "0000000000000000000000000000000000000000"
+  usage-connector:
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    gitSha: "0000000000000000000000000000000000000000"
+  usage-db-backup:
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    gitSha: "0000000000000000000000000000000000000000"
+
+services:
+  api:
+    replicas: 1
+    ingress:
+      host: api-hml.hapvida.khal.ai
+    envOverride:
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: hapvida_hml
+      KHAL_AUTH_URL: https://auth-hml.hapvida.khal.ai
+      CORS_ALLOWED_ORIGINS: https://hapvida-hml.khal.ai,https://*.hapvida.khal.ai
+
+  trace-ingestion-worker:
+    envOverride:
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: hapvida_hml
+      LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch-hml.svc.cluster.local:8123
+    extraEgress:
+      - namespace: kos-langwatch-hml
+        ports:
+          - { protocol: TCP, port: 8123 }
+
+  billing-close-scheduler:
+    envOverride:
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: hapvida_hml
+
+jobs:
+  migrations:
+    envOverride:
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: hapvida_hml
+
+cronjobs:
+  backup:
+    serviceAccount:
+      irsaRoleArn: arn:aws:iam::701016785827:role/hv-kos-usage-backup-hml
+    envOverride:
+      MONGO_USAGE_DB_NAME: hapvida_hml
+      BACKUP_BUCKET: hv-kos-usage-backup-hml

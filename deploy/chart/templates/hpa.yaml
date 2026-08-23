@@ -1,0 +1,35 @@
+{{- /*
+HPA OPCIONAL e DESLIGADO por padrao (CONTRATO §5). Ligar HPA num servico com
+`strategy: Recreate` seria contradicao direta — o singleton deixaria de ser
+singleton — por isso o chart falha fechado nesse caso em vez de renderizar.
+*/ -}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled ($svc.hpa).enabled }}
+{{- if eq ($svc.strategy | default "RollingUpdate") "Recreate" }}
+{{- fail (printf "'%s': hpa.enabled=true com strategy=Recreate — o servico e singleton por design (worker/scheduler duplicariam trabalho)" $name) }}
+{{- end }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "kos.name" $ctx }}
+  namespace: {{ include "kos.namespace" $ }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "kos.name" $ctx }}
+  minReplicas: {{ $svc.hpa.minReplicas | default $svc.replicas }}
+  maxReplicas: {{ required (printf "'%s': hpa.maxReplicas e obrigatorio" $name) $svc.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.hpa.targetCPUUtilizationPercentage | default 70 }}
+{{- end }}
+{{- end }}

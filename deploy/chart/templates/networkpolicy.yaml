@@ -1,0 +1,107 @@
+{{- /*
+Duas policies por servico, ambas ADITIVAS ao default-deny do bundle do namespace
+(khal-infra k8s/kos/<env>/):
+
+  <svc>-edge   ingress dos CIDRs das subnets do ALB -> porta do servico. O ALB em
+               target-type=ip chega com IP das ENIs; o kubelet (probes) tambem
+               esta na VPC. Sem `albSubnetCidrs` nada e renderizado — uma policy
+               de ingress sem `from` e um deny total disfarcado de protecao.
+  <svc>-egress DNS (kube-system) + 443 (ECR/AWS/Atlas SRV) + o que o servico
+               declarar em `extraEgress` (Atlas 27017/1024-65535, ClickHouse 8123).
+
+ATENCAO: o enforcement de NetworkPolicy esta DESLIGADO nos dois clusters Hapvida
+(aws-eks-nodeagent --enable-network-policy=false). Estas policies sao
+DECLARATIVAS — nunca diagnostique um 502 como netpol aqui.
+*/ -}}
+{{- define "kos.netpol" -}}
+{{- $root := .root -}}
+{{- $name := .name -}}
+{{- $spec := .spec -}}
+{{- $ctx := dict "root" $root "name" $name "svc" $spec -}}
+{{- $cidrs := $root.Values.albSubnetCidrs -}}
+{{- if and $cidrs $spec.port ($spec.ingress).enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kos.name" $ctx }}-edge
+  namespace: {{ include "kos.namespace" $root }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- range $cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $spec.port }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kos.name" $ctx }}-egress
+  namespace: {{ include "kos.namespace" $root }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 443
+    {{- range (concat ($root.Values.extraEgress | default list) ($spec.extraEgress | default list)) }}
+    - to:
+        {{- if .cidr }}
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+        {{- end }}
+        {{- if .namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | quote }}
+        {{- end }}
+      ports:
+        {{- range .ports }}
+        - protocol: {{ .protocol | default "TCP" }}
+          port: {{ .port }}
+          {{- with .endPort }}
+          endPort: {{ . }}
+          {{- end }}
+        {{- end }}
+    {{- end }}
+{{- end -}}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- include "kos.netpol" (dict "root" $ "name" $name "spec" $svc) }}
+{{- end }}
+{{- end }}
+{{- range $name, $job := .Values.jobs }}
+{{- if $job.enabled }}
+{{- include "kos.netpol" (dict "root" $ "name" $name "spec" $job) }}
+{{- end }}
+{{- end }}
+{{- range $name, $cj := .Values.cronjobs }}
+{{- if $cj.enabled }}
+{{- include "kos.netpol" (dict "root" $ "name" $name "spec" $cj) }}
+{{- end }}
+{{- end }}

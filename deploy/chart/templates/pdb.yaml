@@ -1,0 +1,32 @@
+{{- /*
+PDB quando ha mais de uma replica (protege a disponibilidade num drain) OU quando
+a estrategia e Recreate (singleton: `maxUnavailable: 0` faz o drain PARAR e pedir
+decisao humana em vez de derrubar o unico worker de ingestao no meio de um
+batch). Com 1 replica NUNCA usar minAvailable: 1 — isso trava o drain para sempre
+sem dizer por que.
+*/ -}}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $recreate := eq ($svc.strategy | default "RollingUpdate") "Recreate" }}
+{{- if or (gt (int $svc.replicas) 1) $recreate }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kos.name" $ctx }}
+  namespace: {{ include "kos.namespace" $ }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+spec:
+  {{- if gt (int $svc.replicas) 1 }}
+  maxUnavailable: 1
+  {{- else }}
+  maxUnavailable: 0
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kos.selectorLabels" $ctx | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

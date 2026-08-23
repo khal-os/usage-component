@@ -1,0 +1,432 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# usage-component — FORMA do deploy em EKS (surface `kos`, grupo `components`)
+#
+# Este arquivo descreve O QUE EXISTE e e igual em TODO ambiente. O que muda por
+# ambiente (pins de imagem, hosts, replicas, URLs, paths do Secrets Manager,
+# ARNs de IRSA) mora em deploy/values-{dev,hml,prod}.yaml. O chart e
+# deploy/chart/ (kos-components 0.1.0).
+#
+# Como o Argo consome: Application multi-source —
+#   source 1: este repo, `path: deploy/chart`, targetRevision = branch do env,
+#             valueFiles: [../values.yaml, ../values-<env>.yaml]
+#   source 2: khal-deploy, `clients/hapvida/<env>/usage-component-values.yaml`
+#             (ref `values`) — valores de CLIENTE, sobrepoem os daqui.
+#
+# Como validar localmente (nenhum destes comandos toca nuvem):
+#   helm lint     deploy/chart -f deploy/values.yaml -f deploy/values-dev.yaml \
+#                              -f deploy/__tests__/fixtures/pins-valid.yaml
+#   helm template kos-components deploy/chart -f deploy/values.yaml \
+#                 -f deploy/values-dev.yaml -f deploy/__tests__/fixtures/pins-valid.yaml
+#   bash deploy/__tests__/run-all.sh
+#
+# REGRAS QUE ESTE ARQUIVO OBEDECE (CONTRATO §0, §5):
+#   · nenhum valor de secret aparece aqui — so o CAMINHO no Secrets Manager;
+#   · o chart nunca renderiza `kind: Secret` nem `imagePullSecrets`;
+#   · imagem so por DIGEST; rollback = `git revert` do commit de pin.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Identidade comum (labels de todo objeto) ─────────────────────────────────
+common:
+  surface: kos
+  client: hapvida
+  # `environment` (dev|hml|prod) vem do values do ambiente.
+
+# ── Registro de imagens ──────────────────────────────────────────────────────
+# Tres imagens, tres Dockerfiles JA EXISTENTES no repo (nao criamos variantes:
+# a esteira atual builda estes mesmos arquivos, e duplicar Dockerfile e garantir
+# que um dos dois vai envelhecer sem ninguem perceber). O non-root NAO vem de um
+# `USER` na imagem e sim do `securityContext` do chart (runAsUser/runAsGroup/
+# fsGroup 1000) — decisao registrada em deploy/README-STREAM.md.
+#
+# `dockerfile` e `context` sao lidos por deploy/services.sh para montar a matrix
+# de build das lanes. A matrix e sobre IMAGENS, nao sobre servicos: api,
+# billing-close-scheduler e o Job de migracao rodam o MESMO binario
+# (usage-module) e nao podem virar tres builds do mesmo commit.
+images:
+  usage-module:
+    repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-module
+    dockerfile: docker/module.Dockerfile
+    context: .
+  usage-connector:
+    repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-connector
+    dockerfile: docker/connector.Dockerfile
+    context: .
+  usage-db-backup:
+    repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-db-backup
+    dockerfile: docker/usage-db-backup.Dockerfile
+    context: .
+
+# ── Servicos ─────────────────────────────────────────────────────────────────
+# `services` e um MAPA (nome -> spec) de proposito: mapa mescla entre valueFiles,
+# lista substitui. Um cliente que precise mudar so as replicas da api nao deve
+# ter de redeclarar os tres servicos.
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # api — a API de leitura (@observability/module). Stateless: escala por
+  # replica, sem lease nem estado local.
+  # ───────────────────────────────────────────────────────────────────────────
+  api:
+    enabled: true
+    group: components
+    image:
+      name: usage-module
+      repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-module
+      # digest/gitSha vem de `pins.usage-module` em values-<env>.yaml.
+      digest: ""
+      gitSha: ""
+    port: 3000
+    # 2 em prod, 1 em dev/hml — declarado no values de cada ambiente. O valor
+    # aqui e o piso seguro para nao existir servico sem `replicas`.
+    replicas: 1
+    strategy: RollingUpdate
+    preset: M
+    # C-5.4: o processo trata SIGTERM (drena requests em voo, fecha o pool do
+    # Mongo) com hard-kill proprio em 10s. 30s da folga para o drain terminar
+    # antes do SIGKILL do kubelet.
+    terminationGracePeriodSeconds: 30
+    # readOnlyRootFilesystem + emptyDir em /tmp.
+    tmpDir: true
+    health:
+      # ⚠ O modulo AINDA NAO tem /healthz, /readyz nem /api/version (CONTRATO §5
+      # permite usar o que existe e registrar follow-up — ver PENDENTE-1 no
+      # README-STREAM). Enquanto isso:
+      #   liveness  = /api/v1/docs/openapi.json — prova de processo: e servido
+      #               pelo express sem tocar o Mongo, entao uma queda do banco
+      #               NAO reinicia os pods em loop.
+      #   readiness = o MESMO path. Isso e HONESTO sobre o que se sabe hoje:
+      #               anunciar "ready" checando o banco exigiria /readyz, que nao
+      #               existe. Um readiness que mente para MENOS (nao entra no
+      #               Service) e caro; este mente para MAIS, e o follow-up e
+      #               justamente fechar essa lacuna.
+      # `/api/v1/docs` (sem barra) responde 301 -> `/api/v1/docs/`: o kubelet
+      # aceita 3xx, mas o ALB so aceita 200 por padrao — por isso o path com
+      # openapi.json, que responde 200 nos dois e continua ABERTO quando o gate
+      # de sessao (KHAL_AUTH_URL) esta ligado.
+      liveness:
+        path: /api/v1/docs/openapi.json
+        initialDelaySeconds: 15
+        periodSeconds: 20
+        timeoutSeconds: 3
+        failureThreshold: 6
+      readiness:
+        path: /api/v1/docs/openapi.json
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 6
+      # Path de versao — a preencher quando /api/version existir (PENDENTE-1).
+      version: ""
+    ingress:
+      enabled: true
+      # host vem do values do ambiente (api-dev. / api-hml. / api.hapvida.khal.ai)
+      host: ""
+      healthcheckPath: /api/v1/docs/openapi.json
+    # Paths do Secrets Manager (relativos a `secretsPathPrefix` do ambiente):
+    #   app   -> knobs sensiveis da aplicacao
+    #   mongo -> MONGO_DB_HOST / MONGO_DB_USER / MONGO_DB_PASSWORD (Atlas)
+    # "point, don't copy": `mongo` e o MESMO segredo lido por api, worker,
+    # scheduler, migracao e backup — cinco ExternalSecrets apontando para um
+    # valor, nunca cinco copias.
+    secrets:
+      - app
+      - mongo
+    # Configuracao NAO-secreta. Nenhum valor de credencial entra aqui (a schema
+    # reprova literal em chave que casa senha/token/secret/key/password).
+    env:
+      - name: SERVER_PORT
+        value: "3000"
+      # Decisao 130: fuso do NEGOCIO deste deploy. Uma so chave decide o corte do
+      # mes da fatura E o fuso de exibicao — a tela sempre concorda com a conta.
+      # Forward-only: nunca mudar depois que um mes fechou.
+      - name: CLIENT_TIMEZONE
+        value: America/Sao_Paulo
+      - name: CLIENT_NAME
+        value: hapvida
+      # `tenant` do JWT de sessao do khal-auth. Obrigatorio quando KHAL_AUTH_URL
+      # esta setado — o boot recusa meio par.
+      - name: KHAL_TENANT
+        value: hapvida
+      # `aud` aceitos do token de sessao (qualquer entrada casa). Tracing e
+      # Billing sao os dois apps que leem os dados deste modulo.
+      - name: KHAL_TOKEN_AUDIENCE
+        value: tracing,billing
+      # Atlas: SRV. A porta e ignorada quando ATLAS=true.
+      - name: MONGO_DB_ATLAS
+        value: "true"
+      - name: LOG_LEVEL
+        value: info
+      - name: LOG_FORMAT
+        value: json
+      # ENVIRONMENT, MONGO_USAGE_DB_NAME, KHAL_AUTH_URL e CORS_ALLOWED_ORIGINS
+      # sao por ambiente -> `envOverride` em values-<env>.yaml.
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # trace-ingestion-worker — o laco de ingestao (@observability/connector).
+  # SINGLETON SEM LEASE: duas replicas ingerem o mesmo batch e duplicam traces
+  # (e a fatura). `Recreate` + `replicas: 1` + PDB `maxUnavailable: 0` sao as
+  # tres travas; nenhuma delas sozinha basta.
+  # ───────────────────────────────────────────────────────────────────────────
+  trace-ingestion-worker:
+    enabled: true
+    group: components
+    image:
+      name: usage-connector
+      repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-connector
+      digest: ""
+      gitSha: ""
+    # Sem porta: e um laco, nao um servidor. Nenhum Service e renderizado.
+    replicas: 1
+    strategy: Recreate
+    preset: M
+    # Uma batelada de 1000 traces precisa TERMINAR antes do SIGKILL — o laco
+    # fecha o batch corrente ao receber SIGTERM. 60s e o mesmo valor do
+    # stop_grace_period do compose e do stopTimeout do ECS.
+    terminationGracePeriodSeconds: 60
+    tmpDir: true
+    health:
+      # Liveness que significa PROGRESSO, nao existencia de processo (audit
+      # G-1): o worker toca /tmp/trace-ingestion-heartbeat depois de CADA batch
+      # concluido; caminhos de erro deliberadamente NAO batem. `pgrep node`
+      # diria "saudavel" para um socket travado do ClickHouse enquanto a
+      # retencao de ~49 dias da fonte queima atras da parada.
+      #
+      # Aqui usamos `stat` (existencia), nao frescor: o compose compara a idade
+      # do arquivo contra 2x intervalo + 120s, mas um probe exec com aritmetica
+      # de data em `sh -c` e fragil de ler e de manter. O frescor real fica como
+      # follow-up (PENDENTE-4) — quando o app expuser /readyz honesto, ele vira
+      # o criterio dos dois lados.
+      liveness:
+        command: ["stat", "/tmp/trace-ingestion-heartbeat"]
+        # Generoso: o primeiro heartbeat so acontece depois do primeiro batch.
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 5
+        failureThreshold: 5
+      readiness:
+        command: ["stat", "/tmp/trace-ingestion-heartbeat"]
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 5
+      version: ""
+    secrets:
+      - app
+      - mongo
+      - langwatch
+    # Egress proprio: ClickHouse do LangWatch (8123) no namespace do ambiente.
+    # DNS e 443 ja estao liberados para todo pod do chart.
+    extraEgress: []
+    env:
+      - name: CLIENT_TIMEZONE
+        value: America/Sao_Paulo
+      - name: CLIENT_NAME
+        value: hapvida
+      - name: MONGO_DB_ATLAS
+        value: "true"
+      - name: LOG_LEVEL
+        value: info
+      - name: LOG_FORMAT
+        value: json
+      # Knobs do laco — os defaults do codigo, escritos EXPLICITAMENTE porque um
+      # default invisivel e um valor que ninguem revisa. Limites checados no
+      # boot (audit F-4): 0 ou lixo derruba o processo em vez de configurar um
+      # busy-loop.
+      - name: TRACE_INGESTION_INTERVAL_SECONDS
+        value: "60"
+      - name: TRACE_INGESTION_BATCH_SIZE
+        value: "1000"
+      # Decisao 61: um trace precisa ficar PARADO este tempo antes de ser
+      # ingerido. Ingerir no meio da execucao congela spans/tokens parciais no
+      # preco para sempre.
+      - name: TRACE_INGESTION_QUIET_PERIOD_SECONDS
+        value: "900"
+      - name: REPROCESS_INTERVAL_SECONDS
+        value: "3600"
+      # Decisao 127: ClickHouse direto e a UNICA fonte real. Sem ela o worker
+      # fica ocioso e o sync RECUSA rodar — nada de fallback silencioso.
+      - name: LANGWATCH_CLICKHOUSE_USER
+        value: default
+      - name: LANGWATCH_CLICKHOUSE_DATABASE
+        value: langwatch
+      # ENVIRONMENT, MONGO_USAGE_DB_NAME e LANGWATCH_CLICKHOUSE_URL por ambiente.
+      # LANGWATCH_CLICKHOUSE_PASSWORD e LANGWATCH_PROJECT_ID vem do secret
+      # `langwatch` (nunca literal).
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # billing-close-scheduler — fechamento automatico do mes (decisao 131).
+  # OPT-IN EXPLICITO: `enabled: false` por padrao. Ligado, ele fecha cada mes
+  # totalmente passado na meia-noite do cliente + atraso, do mais antigo para o
+  # mais novo, pelo MESMO caso de uso do runbook. Um mes REABERTO nunca
+  # re-fecha sozinho. Singleton pelo mesmo motivo do worker.
+  # ───────────────────────────────────────────────────────────────────────────
+  billing-close-scheduler:
+    enabled: false
+    group: components
+    image:
+      name: usage-module
+      repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-module
+      digest: ""
+      gitSha: ""
+    command: ["node", "dist/main/jobs/run-billing-close-scheduler.js"]
+    replicas: 1
+    strategy: Recreate
+    preset: S
+    terminationGracePeriodSeconds: 60
+    tmpDir: true
+    health:
+      # Mesma semantica do worker: o scheduler bate
+      # /tmp/billing-close-heartbeat depois de CADA ciclo de avaliacao concluido
+      # (um fechamento bloqueado E uma decisao concluida e bate); caminhos de
+      # erro nao batem.
+      liveness:
+        command: ["stat", "/tmp/billing-close-heartbeat"]
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 5
+        failureThreshold: 5
+      readiness:
+        command: ["stat", "/tmp/billing-close-heartbeat"]
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 5
+      version: ""
+    secrets:
+      - app
+      - mongo
+    env:
+      - name: SERVER_PORT
+        value: "3000"
+      - name: CLIENT_TIMEZONE
+        value: America/Sao_Paulo
+      - name: CLIENT_NAME
+        value: hapvida
+      - name: MONGO_DB_ATLAS
+        value: "true"
+      - name: LOG_LEVEL
+        value: info
+      - name: LOG_FORMAT
+        value: json
+      # Limites do boot: atraso ate 7 dias, intervalo ate 24h.
+      - name: BILLING_AUTO_CLOSE_DELAY_MINUTES
+        value: "60"
+      - name: BILLING_AUTO_CLOSE_CHECK_INTERVAL_SECONDS
+        value: "900"
+
+# ── Jobs de hook ─────────────────────────────────────────────────────────────
+jobs:
+  # Migracoes do store de uso. Hook PreSync: roda ANTES de qualquer workload da
+  # sincronizacao. Falhou -> o sync para e nenhum pod novo sobe com schema
+  # errado.
+  # ⚠ Um sync PARCIAL do Argo PULA hooks PreSync. Se a api subir 503 e o worker
+  # em CrashLoop com "collection/index nao existe", a suspeita numero 1 e essa.
+  migrations:
+    enabled: true
+    group: components
+    image:
+      name: usage-module
+      repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-module
+      digest: ""
+      gitSha: ""
+    command: ["node", "dist/main/jobs/run-migrations.js"]
+    hook: PreSync
+    hookDeletePolicy: BeforeHookCreation
+    # backoffLimit 0: exit != 0 e RESULTADO (diagnostico), nao erro para retry.
+    backoffLimit: 0
+    activeDeadlineSeconds: 600
+    preset: S
+    tmpDir: true
+    secrets:
+      - app
+      - mongo
+    env:
+      - name: SERVER_PORT
+        value: "3000"
+      - name: CLIENT_TIMEZONE
+        value: America/Sao_Paulo
+      - name: CLIENT_NAME
+        value: hapvida
+      - name: MONGO_DB_ATLAS
+        value: "true"
+      - name: LOG_LEVEL
+        value: info
+      - name: LOG_FORMAT
+        value: json
+
+# ── CronJobs ─────────────────────────────────────────────────────────────────
+cronjobs:
+  # Backup mongodump -> S3, em streaming (sem disco local). Sai != 0 em QUALQUER
+  # falha; o alarme de 25h observa a metrica CloudWatch `Usage/Backup Succeeded`
+  # que o proprio entrypoint publica. Um backup que falha em silencio e pior que
+  # nenhum.
+  backup:
+    enabled: true
+    group: components
+    image:
+      name: usage-db-backup
+      repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-db-backup
+      digest: ""
+      gitSha: ""
+    # 07:00 no fuso do cliente. `timeZone` EXPLICITO: sem ele o
+    # kube-controller-manager usa UTC e "07:00" vira 04:00 em Sao Paulo.
+    schedule: "0 7 * * *"
+    timeZone: America/Sao_Paulo
+    concurrencyPolicy: Forbid
+    backoffLimit: 0
+    activeDeadlineSeconds: 3600
+    preset: S
+    # A imagem e debian + aws-cli + mongodb-tools; a aws-cli quer um HOME
+    # gravavel e mongodump escreve o archive em STDOUT (nunca em disco).
+    # emptyDir em /tmp + HOME=/tmp resolve os dois com rootfs read-only.
+    tmpDir: true
+    tmpDirSizeLimit: 256Mi
+    serviceAccount:
+      # IRSA `hv-kos-usage-backup-<env>` (S3 PutObject no prefixo do cliente +
+      # cloudwatch:PutMetricData). ARN por ambiente.
+      irsaRoleArn: ""
+    secrets:
+      - mongo
+    env:
+      - name: HOME
+        value: /tmp
+      - name: AWS_REGION
+        value: sa-east-1
+      # BACKUP_BUCKET e por ambiente; BACKUP_PREFIX e o slug do cliente e vira
+      # tanto o prefixo S3 (backups/<prefix>/) quanto a dimensao `Tenant` da
+      # metrica CloudWatch.
+      - name: BACKUP_PREFIX
+        value: hapvida
+
+# ── Borda / rede ─────────────────────────────────────────────────────────────
+ingressDefaults:
+  className: alb
+  # groupName e por ambiente (hapvida-dev | hapvida-hml | hapvida-prod).
+  groupName: ""
+  scheme: internet-facing
+  targetType: ip
+  pathType: Prefix
+  path: /
+
+# CIDRs das subnets do ALB do ambiente — por ambiente.
+albSubnetCidrs: []
+
+# Egress comum a todos os pods, alem de DNS e 443. Atlas via PrivateLink usa
+# faixa alta de portas (1024-65535) alem da 27017; ClickHouse do LangWatch e
+# 8123 no namespace kos-langwatch-<hml|prod>. Definido por ambiente porque o
+# namespace do LangWatch muda.
+extraEgress: []
+
+# ── ESO ──────────────────────────────────────────────────────────────────────
+externalSecrets:
+  storeKind: ClusterSecretStore
+  # storeName: hapvida-dev (dev E hml, conta 701) | hapvida-prod (conta 652).
+  storeName: ""
+  refreshInterval: 1m
+
+# Prefixo dos paths do Secrets Manager — por ambiente.
+secretsPathPrefix: ""
+
+# ── Pins ─────────────────────────────────────────────────────────────────────
+# Escrito por deploy/gitops-pin.sh em deploy/values-<env>.yaml. Nunca aqui.
+pins: {}
