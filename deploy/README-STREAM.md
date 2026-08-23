@@ -95,7 +95,7 @@ Envs por ambiente (`envOverride` em `values-<env>.yaml`):
 | `LANGWATCH_CLICKHOUSE_URL` | `http://clickhouse.kos-langwatch-hml.svc.cluster.local:8123` | idem | `http://clickhouse.kos-langwatch.svc.cluster.local:8123` |
 | `CORS_ALLOWED_ORIGINS` | `https://hapvida-dev.khal.ai,https://*.hapvida.khal.ai` | `https://hapvida-hml.khal.ai,…` | `https://hapvida.khal.ai,…` |
 | `MONGO_USAGE_DB_NAME` | `hapvida_dev` | `hapvida_hml` | `hapvida` |
-| `BACKUP_BUCKET` | `hv-kos-usage-backup-dev` | `-hml` | `-prod` |
+| `BACKUP_BUCKET` | `hv-kos-usage-backups-dev` | `-hml` | `-prod` |
 
 `CLIENT_TIMEZONE=America/Sao_Paulo`, `CLIENT_NAME=hapvida`, `KHAL_TENANT=hapvida`,
 `KHAL_TOKEN_AUDIENCE=tracing,billing`, `MONGO_DB_ATLAS=true`, `LOG_LEVEL/FORMAT`
@@ -303,7 +303,7 @@ reconciliador; enquanto isso os valores atuais ficam.
 | host do Ingress da api (`values-<env>.yaml`) | `api-dev.hapvida.khal.ai` · `api-hml.hapvida.khal.ai` · `api.hapvida.khal.ai` | §3, linha "usage api" da tabela de hosts | **CONFERE** |
 | `ingressDefaults.groupName` (`values-<env>.yaml`) | `hapvida-dev` · `hapvida-hml` · `hapvida-prod` | §1/§3: IngressGroups por ambiente | **CONFERE** |
 | `cronjobs.backup.serviceAccount.irsaRoleArn` (`values-<env>.yaml`) | `arn:aws:iam::701016785827:role/hv-kos-usage-backup-dev` · `…-hml` · `arn:aws:iam::652197205677:role/hv-kos-usage-backup-prod` | §8 nomeia a **role** `hv-kos-usage-backup-<env>`; §1 da as contas. O ARN completo nunca e escrito no contrato | **ASSUMIDO (composicao)** — a role e criada pelo modulo `kos-client-foundation` (stream A). Se o modulo prefixar/sufixar diferente, muda 1 linha por `values-<env>.yaml`; **falha VISIVEL** (o pod do backup nao assume a role) |
-| `BACKUP_BUCKET` (`values-<env>.yaml`) | `hv-kos-usage-backup-dev` · `-hml` · `-prod` | o CONTRATO **nao nomeia** o bucket de backup do usage (so o do LangWatch, `hv-kos-langwatch-<env>-objects`, §9) | **ASSUMIDO** — canonico vem do `kos-client-foundation`. Nome errado **nao falha ruidosamente**: ou o `PutObject` nega, ou o backup arquiva no lugar errado |
+| `BACKUP_BUCKET` (`values-<env>.yaml`) | `hv-kos-usage-backups-dev` · `-hml` · `-prod` | o CONTRATO **nao nomeia** o bucket de backup do usage (so o do LangWatch, `hv-kos-langwatch-<env>-objects`, §9) | **RESOLVIDO 2026-08-23** (reconciliacao cross-stream) — era `hv-kos-usage-backup-<env>`, SINGULAR. O canonico e o PLURAL `hv-kos-usage-backups-<env>`: e o nome que o `aws_s3_bucket` do modulo `kos-client-foundation` cria (provado no `tofu plan`) e o unico ARN que a policy da role autoriza. Era exatamente o modo de falha descrito aqui — `PutObject` negado num bucket que nao existe |
 | `MONGO_USAGE_DB_NAME` (`values-<env>.yaml`) | `hapvida_dev` · `hapvida_hml` · `hapvida` | o CONTRATO **nao define**; §8 so cita o modulo `atlas-usage`. PLANO §4.3: dev e hml dividem o cluster Atlas de hml, logo os bancos TEM de diferir | **ASSUMIDO** — canonico vem do `atlas-usage`. Nome errado nao falha: **arquiva no banco errado** (a decisao 139 exige o nome DECLARADO justamente por isso) |
 | `LANGWATCH_PROJECT_ID` (JSON `/hapvida/<env>/kos/components/langwatch`) | no Secrets Manager, junto de `LANGWATCH_CLICKHOUSE_PASSWORD` | §4 lista o parametro **SSM** `/hapvida/<env>/kos/components/langwatch-project-id` | **DIVERGENCIA DECLARADA** — nao ha CSS de ParameterStore nem `ssm:GetParameter` na policy do ESO (PENDENTE-2); some com uma linha em `secrets:` quando existirem |
 
@@ -602,3 +602,74 @@ procedimento de "desativar ambiente".
    `workflow_dispatch` na `eks/dev` (o placeholder faz a Application ficar
    OutOfSync ate o primeiro pin, o que e o comportamento desejado).
 8. So depois: `eks/homolog`, e por ultimo `KOS_EKS_PROD_ENABLED` + `eks/main`.
+
+---
+
+## Reconciliação cross-stream (2026-08-23) — mesma branch, commit próprio
+
+Um passe de reconciliação leu as quatro streams juntas. Tabela completa em
+`~/Deploy/Platform/work/RECONCILIATION.md`. O que mudou **neste** repo:
+
+| Tópico | Antes | Agora | Arquivo |
+|---|---|---|---|
+| **Nome do bucket de backup** | `hv-kos-usage-backup-<env>` (singular) | **`hv-kos-usage-backups-<env>`** (plural) | `deploy/values-{dev,hml,prod}.yaml` |
+| **Nome do arquivo de values de cliente** | `usage-component-values.yaml` (no cabeçalho) | **`components-values.yaml`** | `deploy/values.yaml` |
+| **Schema fechado no topo** | `additionalProperties: true` | `false` | `deploy/chart/values.schema.json` |
+
+### O bucket: PENDENTE-3 fechada com evidência
+
+O `tofu plan` do `kos-client-foundation` (stream A, `-var env=hml`, backend local,
+SSO real) imprime `BUCKET hv-kos-usage-backups-hml` — plural — e a policy da role
+`hv-kos-usage-backup-hml` autoriza **esse** ARN e nenhum outro. Com o singular, o
+CronJob subiria com a credencial certa e levaria `AccessDenied`/`NoSuchBucket`
+todo dia às 07:00 BRT, sem acordar ninguém: era exatamente a "falha não-ruidosa"
+que a própria tabela de chaves assumidas previa.
+
+Note que **a role continua no singular** (`hv-kos-usage-backup-<env>`) e isso não
+é inconsistência: é outro nome, noutro namespace da AWS, e quem manda nos dois é
+o mesmo Tofu. O `irsaRoleArn` dos três `values-<env>.yaml` já estava certo.
+
+### O nome do arquivo de cliente
+
+O CONTRACT §3 diz `clients/hapvida/<env>/<app>-values.yaml`, e `<app>` é o **grupo**
+que a Application sincroniza (`hv-kos-components-<env>`), não o repositório. As
+Applications da stream D referenciam `components-values.yaml`; o cabeçalho daqui
+dizia `usage-component-values.yaml`. Quem referencia vence — um valueFile que não
+existe faz o Argo reprovar o render inteiro.
+
+Na mesma linha: as Applications **não** carregam `values-group-components.yaml`.
+Este repo tem um grupo só (CONTRACT §5) e não tem esse arquivo; a stream D o
+referenciava e o removeu.
+
+### Por que o schema agora recusa chave de topo desconhecida
+
+Os arquivos de cliente do khal-deploy usavam um vocabulário que este chart não
+tem (`global.tenant`, `services.<x>.envFrom.secrets`). Aqui o schema **por
+serviço** já era estrito e reprovou na hora — o que é o comportamento certo — mas
+o de **topo** era `true`, e uma chave como `global:` teria passado batida. Fechado.
+
+### `KHAL_AUTH_URL` e as netpols (tópico 6 da reconciliação)
+
+Confirmado como está: o host **público** nos três ambientes. A mesma variável é o
+`iss` esperado do token de sessão, e o `iss` que o khal-auth assina é
+`AUTH_ISSUER = https://<host da borda>`. É a mesma rota dos 5 registers (khal-infra
+P10). Quem mudou foi a stream A: as `12-network-policy-cross-ns.yaml` declaravam
+`components → platform:4000` in-cluster (as duas pontas) e foram alinhadas à borda.
+O egress para o LangWatch também foi estreitado para **8123 apenas** — é o único
+endereço de LangWatch que este chart emite (`LANGWATCH_CLICKHOUSE_URL`); a 5560 do
+chart oficial não é consumida daqui.
+
+### Validações re-rodadas
+
+```
+$ helm template kos-components deploy/chart -f values.yaml -f values-<env>.yaml \
+    -f __tests__/fixtures/pins-valid.yaml \
+    -f $values/clients/hapvida/<env>/components-values.yaml     3/3 OK (dev, hml, prod)
+$ bash deploy/__tests__/run-all.sh                              TODAS as suites passaram
+    (chart-contract, services, gitops-pin, verify-argo, lanes — lanes: 84 ok, 0 falha)
+
+# o arquivo de cliente NÃO é mais um no-op, e nem redundante:
+$ diff <(render sem o -f do cliente) <(render com)              vazio  (os dois lados concordam)
+$ diff <(render sem) <(render com o cliente PERTURBADO)         28 linhas mudam,
+                                                                 'PERTURBADO' 14× no YAML final
+```

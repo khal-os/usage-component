@@ -3,7 +3,8 @@
   "title": "kos-components — contrato dos values",
   "description": "Reprova, ANTES do cluster ver qualquer coisa: valor literal em chave de segredo, servico sem readiness, preset junto de resources, e digest que nao e um sha256 de 64 hex. Cada uma dessas quatro ja foi um incidente em algum repo da frota; a schema existe para que a proxima seja um erro de `helm template`.",
   "type": "object",
-  "additionalProperties": true,
+  "_comment_additionalProperties": "false, e nao true, por causa de um achado real da reconciliacao cross-stream (2026-08-23): os arquivos de cliente do khal-deploy tinham sido escritos com um vocabulario inventado (`global.tenant`, `services.<x>.envFrom`) e o Helm os aceitou em silencio — `helm template` com e sem o arquivo dava o mesmo YAML. Uma chave de topo desconhecida nunca e um extra inofensivo: e sempre alguem achando que configurou algo. Aqui ela vira erro de render.",
+  "additionalProperties": false,
   "properties": {
     "namePrefix": { "type": "string" },
     "namespace": { "type": "string" },

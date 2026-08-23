@@ -81,4 +81,13 @@ cronjobs:
       irsaRoleArn: arn:aws:iam::652197205677:role/hv-kos-usage-backup-prod
     envOverride:
       MONGO_USAGE_DB_NAME: hapvida
-      BACKUP_BUCKET: hv-kos-usage-backup-prod
+      # RECONCILIADO 2026-08-23 (RECONCILIATION.md, topico 2): o nome CANONICO
+      # do bucket e `hv-kos-usage-backups-<env>` — PLURAL. Nao e escolha de
+      # gosto: e o nome que o `aws_s3_bucket` do modulo `kos-client-foundation`
+      # (khal-infra, stream A) cria, provado no `tofu plan` (`BUCKET
+      # hv-kos-usage-backups-<env>`), e e o unico ARN que a policy da role
+      # `hv-kos-usage-backup-<env>` autoriza. Com o singular, o CronJob subiria
+      # com a credencial certa e levaria AccessDenied num bucket que nao existe.
+      # (A ROLE segue no singular `hv-kos-usage-backup-<env>`: e outro nome,
+      # noutro namespace da AWS, e quem manda nele tambem e o Tofu.)
+      BACKUP_BUCKET: hv-kos-usage-backups-prod

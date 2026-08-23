@@ -9,8 +9,14 @@
 # Como o Argo consome: Application multi-source —
 #   source 1: este repo, `path: deploy/chart`, targetRevision = branch do env,
 #             valueFiles: [../values.yaml, ../values-<env>.yaml]
-#   source 2: khal-deploy, `clients/hapvida/<env>/usage-component-values.yaml`
+#   source 2: khal-deploy, `clients/hapvida/<env>/components-values.yaml`
 #             (ref `values`) — valores de CLIENTE, sobrepoem os daqui.
+#             O nome do arquivo e `components-values.yaml` e nao
+#             `usage-component-values.yaml`: o CONTRACT §3 diz
+#             `<app>-values.yaml`, e `<app>` e o GRUPO que a Application
+#             sincroniza (`hv-kos-components-<env>`), nao o repositorio.
+#             Reconciliado com a stream D em 2026-08-23 (RECONCILIATION.md,
+#             topico 3) — o nome que a Application referencia vence.
 #
 # Como validar localmente (nenhum destes comandos toca nuvem):
 #   helm lint     deploy/chart -f deploy/values.yaml -f deploy/values-dev.yaml \
