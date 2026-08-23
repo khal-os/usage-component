@@ -1,0 +1,331 @@
+# LANE 2/3 — homolog: PROMOVE os digests que a lane dev ja construiu. NAO BUILDA.
+#
+# Rebuildar aqui recompilaria dependencias e produziria binarios diferentes dos
+# validados em dev — que e exatamente a deriva que faz "funcionava em homolog"
+# virar incidente de producao.
+#
+# DE ONDE VEM O BLOCO DE DIGESTS: do ARQUIVO da branch de origem, nao de
+# `HEAD^2`. `HEAD^2` presume que a promocao e sempre um merge commit de dois pais
+# na ordem certa: um fast-forward nao tem segundo pai, um octopus tem tres, e um
+# `git revert` de promocao inverte o significado — nos tres casos ele aponta para
+# um lugar plausivel e errado, e a lane promove o digest de outra coisa.
+#
+# Na pratica lemos `git archive origin/eks/dev deploy` e rodamos `helm template`
+# nele: e assim que se resolve a MESMA sobreposicao values.yaml +
+# values-dev.yaml que o Argo resolve, sem reimplementar merge de YAML aqui.
+#
+# ESCADA: eks/dev ─(values-dev.yaml)→ eks/homolog ─(values-hml.yaml)→ eks/main
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# O QUE O OWNER PRECISA CADASTRAR: as mesmas Variables e o mesmo secret da lane
+# dev (KOS_EKS_PUBLISH_ENABLED, ARGOCD_CI_TOKEN). O gate de publicacao e o MESMO
+# de proposito: se so a lane que CONSTROI ficasse desligada, as que PROMOVEM
+# rodariam soltas procurando um digest que nunca foi publicado.
+# ─────────────────────────────────────────────────────────────────────────────
+name: eks-deploy-homolog
+
+on:
+  push:
+    branches: [eks/homolog]
+    # ANTI-LACO: o commit de pin desta lane toca EXATAMENTE values-hml.yaml.
+    # NAO use `deploy/values-*.yaml` aqui: a promocao chega nesta branch como um
+    # push que traz values-dev.yaml, e o padrao largo faria a lane se
+    # auto-ignorar justamente no push que deveria promover.
+    paths-ignore:
+      - 'deploy/values-hml.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: eks-deploy-homolog
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # o gitops-pin commita e faz push de values-hml.yaml
+  id-token: write   # OIDC para LER o ECR (guard de existencia) e re-taguear
+
+env:
+  AWS_REGION: sa-east-1
+  AWS_ROLE_ARN: arn:aws:iam::278522730053:role/gha-kos-usage-component-ecr-push
+  ECR_REGISTRY: 278522730053.dkr.ecr.sa-east-1.amazonaws.com
+  SRC_BRANCH: eks/dev
+  SRC_ENV: dev
+  DST_ENV: hml
+  DST_NAMESPACE: kos-components-hml
+  ARGOCD_APP: hv-kos-components-hml
+
+jobs:
+  promover:
+    name: promover digests de dev → hml
+    runs-on: ubuntu-latest
+    if: vars.KOS_EKS_PUBLISH_ENABLED == 'true'
+    steps:
+      - name: A ref e a branch eks/homolog?
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" != "eks/homolog" ]; then
+            echo "::error::esta lane so promove a partir de eks/homolog (recebi '${GITHUB_REF_NAME}')."
+            exit 1
+          fi
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
+        with:
+          version: v3.16.3
+
+      - name: garantir PyYAML
+        run: python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check --quiet 'pyyaml==6.0.2'
+
+      # ── guards (a) e (b): forma e procedencia do bloco de origem ────────────
+      - name: Ler o bloco de digests do ARQUIVO da branch de origem
+        id: origem
+        run: |
+          set -euo pipefail
+          # O checkout traz so a branch corrente; a de origem tem de ser buscada.
+          git fetch --no-tags origin "+refs/heads/${SRC_BRANCH}:refs/remotes/origin/${SRC_BRANCH}"
+
+          SRC="$(mktemp -d)"
+          git archive "origin/${SRC_BRANCH}" deploy | tar -x -C "$SRC"
+
+          if ! helm template kos-components "${SRC}/deploy/chart" --namespace "kos-components-${SRC_ENV}" \
+                 -f "${SRC}/deploy/values.yaml" -f "${SRC}/deploy/values-${SRC_ENV}.yaml" \
+                 > "${SRC}/render.yaml" 2> "${SRC}/render.err"; then
+            echo "::error::origin/${SRC_BRANCH} nao renderiza deploy/chart com values-${SRC_ENV}.yaml. Quase sempre significa que a origem ainda nao tem digest pinado (a lane dev nunca rodou). Saida do helm:"
+            sed -e 's/^/  /' "${SRC}/render.err" >&2
+            exit 1
+          fi
+
+          REPOS="$(KOS_VALUES_FILE="${SRC}/deploy/values.yaml" "${SRC}/deploy/services.sh" repos)"
+          IMAGENS="$(awk '$1 == "image:" { gsub(/"/, "", $2); print $2 }' "${SRC}/render.yaml" | sort -u)"
+          [ -n "$IMAGENS" ] || { echo "::error::origin/${SRC_BRANCH} nao renderiza nenhuma imagem"; exit 1; }
+
+          BLOCO='{}'
+          while read -r IMG; do
+            # ── guard (a): o digest e um sha256 de verdade ───────────────────
+            if [[ ! "$IMG" =~ ^([^@[:space:]]+)@(sha256:[0-9a-f]{64})$ ]]; then
+              echo "::error::guard_digest=fail — origin/${SRC_BRANCH} nao esta pinado por digest: renderiza '${IMG}'"; exit 1
+            fi
+            REPO="${BASH_REMATCH[1]}"; DIGEST="${BASH_REMATCH[2]}"
+
+            # ── guard (b): o repositorio e um dos declarados em `images:` ────
+            # Um values de origem que sobrescrevesse image.repository promoveria
+            # um digest de OUTRO registry — o digest casaria o regex e nada mais
+            # reclamaria.
+            NOME="$(jq -r --arg r "$REPO" 'to_entries[] | select(.value == $r) | .key' <<<"$REPOS")"
+            if [ -z "$NOME" ]; then
+              echo "::error::guard_repo=fail — origin/${SRC_BRANCH} renderiza '${REPO}', que nao esta em images: (declaradas: $(jq -r 'to_entries|map(.value)|join(", ")' <<<"$REPOS"))"; exit 1
+            fi
+            BLOCO="$(jq --arg k "$NOME" --arg v "$DIGEST" '. + {($k): $v}' <<<"$BLOCO")"
+          done <<<"$IMAGENS"
+
+          # O GIT_SHA vem do MESMO render: e o commit de origem que produziu
+          # estes digests, e e a base do guard de frescor.
+          SRC_SHA="$(awk '/^[[:space:]]*-[[:space:]]*name:[[:space:]]*GIT_SHA[[:space:]]*$/ { p = 1; next }
+                          p { gsub(/"/, "", $2); print $2; p = 0 }' "${SRC}/render.yaml" | sort -u)"
+          if [ "$(printf '%s\n' "$SRC_SHA" | wc -l)" != "1" ] || [[ ! "$SRC_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::guard_frescor=fail — origin/${SRC_BRANCH} nao carrega um gitSha unico e valido (li '${SRC_SHA}'). Sem ele nao da para saber de qual commit os digests vieram."; exit 1
+          fi
+
+          echo "bloco=$(jq -c . <<<"$BLOCO")" >> "$GITHUB_OUTPUT"
+          echo "src_sha=${SRC_SHA}"          >> "$GITHUB_OUTPUT"
+          jq . <<<"$BLOCO"
+          rm -rf "$SRC"
+
+      - name: Guard de frescor — a origem andou depois destes digests?
+        env:
+          SRC_SHA: ${{ steps.origem.outputs.src_sha }}
+        run: |
+          set -euo pipefail
+          # Conta commits de CODIGO em origin/<origem> depois do commit que gerou
+          # os digests. Os values sao excluidos porque o proprio commit de pin
+          # vive la e contaria como "novidade" em 100% das promocoes.
+          PENDENTES="$(git rev-list --count "${SRC_SHA}..origin/${SRC_BRANCH}" -- . ':(exclude)deploy/values-*.yaml')"
+          echo "commits de codigo em origin/${SRC_BRANCH} depois de ${SRC_SHA}: ${PENDENTES}"
+          if [ "$PENDENTES" -gt 0 ]; then
+            echo "::error::guard_frescor=fail — ha ${PENDENTES} commit(s) de codigo em origin/${SRC_BRANCH} que NAO estao nestes digests. Promover agora colocaria em ${DST_ENV} uma imagem mais velha que a origem, e a esteira passaria a mentir sobre o que foi validado. Rode a lane dev primeiro. (origem=${SRC_SHA} ponta=$(git rev-parse "origin/${SRC_BRANCH}"))"
+            git --no-pager log --oneline "${SRC_SHA}..origin/${SRC_BRANCH}" -- . ':(exclude)deploy/values-*.yaml' | head -20 >&2
+            exit 1
+          fi
+          echo "  ok guard_frescor: os digests cobrem a ponta de origin/${SRC_BRANCH}"
+
+      # ── guard (c): o DESTINO renderiza exatamente o conjunto declarado ──────
+      - name: Guard de render do destino
+        env:
+          BLOCO: ${{ steps.origem.outputs.bloco }}
+        run: |
+          set -euo pipefail
+          TMP="$(mktemp -d)"
+          # Overlay so com os pins, aplicado por ultimo: prova o que o chart do
+          # DESTINO vai renderizar com estes digests, ANTES de escrever qualquer
+          # coisa no git.
+          {
+            echo "pins:"
+            jq -r 'to_entries[] | "  \(.key):\n    digest: \"\(.value)\"\n    gitSha: \"'"${{ steps.origem.outputs.src_sha }}"'\""' <<<"$BLOCO"
+          } > "${TMP}/pins.yaml"
+          cat "${TMP}/pins.yaml"
+
+          helm template kos-components deploy/chart --namespace "$DST_NAMESPACE" \
+            -f deploy/values.yaml -f "deploy/values-${DST_ENV}.yaml" -f "${TMP}/pins.yaml" \
+            > "${TMP}/render.yaml"
+
+          REPOS="$(deploy/services.sh repos)"
+          ESPERADAS="$(deploy/services.sh workloads | awk -F'\t' '$4 == "true" { print $3 }' | sort -u \
+            | while read -r NOME; do
+                echo "$(jq -r --arg k "$NOME" '.[$k]' <<<"$REPOS")@$(jq -r --arg k "$NOME" '.[$k]' <<<"$BLOCO")"
+              done | sort -u)"
+          ENCONTRADAS="$(awk '$1 == "image:" { gsub(/"/, "", $2); print $2 }' "${TMP}/render.yaml" | sort -u)"
+
+          if [ "$ESPERADAS" != "$ENCONTRADAS" ]; then
+            echo "::error::guard_render_destino=fail — o chart de ${DST_ENV} nao renderiza o conjunto promovido."
+            # word splitting DELIBERADO: uma linha por imagem.
+            # shellcheck disable=SC2086
+            { echo "  esperado:";    printf '    %s\n' $ESPERADAS; }
+            # shellcheck disable=SC2086
+            { echo "  renderizado:"; printf '    %s\n' $ENCONTRADAS; }
+            exit 1
+          fi
+          echo "  ok guard_render_destino: conjunto identico ($(printf '%s\n' "$ESPERADAS" | wc -l) imagens)"
+
+      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-kos-usage-hml-${{ github.run_id }}
+
+      - name: Login no ECR
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      # ── guard (d): existencia real + tag de lane no MESMO digest ────────────
+      # A tag de lane tira o digest promovido da mira da lifecycle policy: ele
+      # nasceu carregando so `dev-<sha>`, e a regra de retencao `dev-` o
+      # expiraria cem builds depois. O sintoma nao aparece no deploy — aparece
+      # como ImagePullBackOff no proximo pod que nascer, e o `git revert` de
+      # rollback vira referencia morta.
+      #
+      # ISTO RODA ANTES DO PIN, de proposito: se a tag nao entrar, a lane morre
+      # aqui e values-hml.yaml continua apontando para o digest anterior. Pinar
+      # primeiro deixaria o ambiente preso num digest desprotegido.
+      - name: Probe autenticado + retag `hml-` no MESMO digest
+        id: retag
+        env:
+          BLOCO: ${{ steps.origem.outputs.bloco }}
+          SRC_SHA: ${{ steps.origem.outputs.src_sha }}
+        run: |
+          set -euo pipefail
+          TAG="${DST_ENV}-${SRC_SHA}"
+          TRAB="$(mktemp -d)"
+
+          for NOME in $(jq -r 'keys[]' <<<"$BLOCO"); do
+            DIGEST="$(jq -r --arg k "$NOME" '.[$k]' <<<"$BLOCO")"
+            REPOSITORY="kos/${NOME}"
+
+            # Probe: ler o registry POR DIGEST, ja autenticado. Um 401 nao prova
+            # ausencia de nada — por isso o probe vem depois do login, nunca antes.
+            VISTO="$(aws ecr describe-images \
+              --repository-name "$REPOSITORY" \
+              --image-ids "imageDigest=${DIGEST}" \
+              --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+            [ "$VISTO" = "$DIGEST" ] \
+              || { echo "::error::guard_registry=fail — ${REPOSITORY}@${DIGEST} nao existe no ECR (li '${VISTO}')"; exit 1; }
+            echo "  ok guard_registry: ${REPOSITORY}@${DIGEST}"
+
+            # Le de volta os BYTES do manifest ja publicado. `--accepted-media-types`
+            # fixa a representacao: sem isso a ECR pode devolver outro formato, o
+            # manifest reenviado teria outro sha256 e a tag pousaria numa imagem NOVA.
+            aws ecr batch-get-image \
+              --repository-name "$REPOSITORY" \
+              --image-ids "imageDigest=${DIGEST}" \
+              --accepted-media-types \
+                "application/vnd.docker.distribution.manifest.v2+json" \
+                "application/vnd.oci.image.manifest.v1+json" \
+              --output json > "${TRAB}/resposta.json"
+            FALHA="$(jq -r '.failures[0].failureCode // empty' "${TRAB}/resposta.json")"
+            [ -z "$FALHA" ] || { echo "::error::retag=fail — batch-get-image nao devolveu manifest para ${DIGEST}: ${FALHA}"; exit 1; }
+
+            # `jq -j` nao acrescenta newline. UM byte a mais muda o sha256 do
+            # manifest e a ECR criaria uma imagem diferente em vez de taguear a
+            # promovida.
+            jq -j '.images[0].imageManifest' "${TRAB}/resposta.json" > "${TRAB}/manifest.json"
+            [ -s "${TRAB}/manifest.json" ] || { echo "::error::retag=fail — manifest vazio para ${DIGEST}"; exit 1; }
+
+            # `--image-digest` faz a ECR RECUSAR o put se os bytes nao baterem:
+            # falha ruidosa em vez de tag pousada no lugar errado.
+            ARGS=(--repository-name "$REPOSITORY" --image-tag "$TAG"
+                  --image-manifest "file://${TRAB}/manifest.json" --image-digest "$DIGEST")
+            MEDIA="$(jq -r '.mediaType // empty' "${TRAB}/manifest.json")"
+            [ -z "$MEDIA" ] || ARGS+=(--image-manifest-media-type "$MEDIA")
+
+            set +e
+            SAIDA="$(aws ecr put-image "${ARGS[@]}" 2>&1)"; RC=$?
+            set -e
+            if [ "$RC" -ne 0 ]; then
+              case "$SAIDA" in
+                *ImageAlreadyExistsException*|*ImageTagAlreadyExistsException*)
+                  echo "  · put-image: ${REPOSITORY}:${TAG} ja existia (re-run) — vai para a conferencia" ;;
+                *)
+                  echo "::error::retag=fail — put-image recusou ${REPOSITORY}:${TAG} em ${DIGEST}:"
+                  printf '%s\n' "$SAIDA" | sed -e 's/^/  /' >&2
+                  exit 1 ;;
+              esac
+            fi
+
+            ATUAL="$(aws ecr describe-images --repository-name "$REPOSITORY" \
+              --image-ids "imageTag=${TAG}" --query 'imageDetails[0].imageDigest' --output text)"
+            [ "$ATUAL" = "$DIGEST" ] \
+              || { echo "::error::retag=fail — a tag ${REPOSITORY}:${TAG} resolve para '${ATUAL}', nao para ${DIGEST}."; exit 1; }
+            echo "  ok retag: ${REPOSITORY}:${TAG} -> ${DIGEST} (mesmo manifest, zero camada nova)"
+          done
+          rm -rf "$TRAB"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Instante do push (para o gate medir reconciledAt)
+        id: relogio
+        run: echo "epoch=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Pinar os MESMOS digests em deploy/values-hml.yaml
+        id: pin
+        env:
+          BLOCO: ${{ steps.origem.outputs.bloco }}
+        run: deploy/gitops-pin.sh "$DST_ENV" "$BLOCO" "$GITHUB_SHA"
+
+      - name: Gate — a Application convergiu para estes digests?
+        env:
+          ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER }}
+          ARGOCD_CI_TOKEN: ${{ secrets.ARGOCD_CI_TOKEN }}
+          ARGOCD_VERIFY_REQUIRE_LIVE: '1'
+          ARGOCD_VERIFY_DEADLINE_SECONDS: '900'
+          EXPECTED_IMAGE_PREFIX: ${{ env.ECR_REGISTRY }}/kos/
+          PIN_SHA: ${{ steps.pin.outputs.pin_sha }}
+          EPOCH: ${{ steps.relogio.outputs.epoch }}
+        run: deploy/verify-argo.sh "$ARGOCD_APP" "$DST_ENV" "$PIN_SHA" "$EPOCH"
+
+      # ── guard (e): a evidencia ─────────────────────────────────────────────
+      - name: Evidencia
+        if: always()
+        env:
+          BLOCO: ${{ steps.origem.outputs.bloco }}
+          SRC_SHA: ${{ steps.origem.outputs.src_sha }}
+          TAG_LANE: ${{ steps.retag.outputs.tag }}
+          PIN: ${{ steps.pin.outputs.pin_sha }}
+        run: |
+          {
+            echo "### eks-deploy-homolog — promocao por digest, sem build"
+            echo
+            echo "| campo | valor |"
+            echo "| --- | --- |"
+            echo "| origem | \`origin/${SRC_BRANCH}\` → \`deploy/values-${SRC_ENV}.yaml\` |"
+            echo "| commit que gerou os digests | \`${SRC_SHA:-<nao lido>}\` |"
+            echo "| tag de lane no mesmo digest | \`${TAG_LANE:-<nao aplicada>}\` |"
+            echo "| destino | \`deploy/values-${DST_ENV}.yaml\` na branch \`${GITHUB_REF_NAME}\` |"
+            echo "| commit de pin | \`${PIN:-<nao pinado>}\` |"
+            echo "| Application | \`${ARGOCD_APP}\` |"
+            echo
+            echo "Bloco promovido:"
+            echo '```json'
+            echo "${BLOCO:-{}}"
+            echo '```'
+            echo
+            echo "Guards executados: (a) formato do digest · (b) repositorio declarado em \`images:\` · (c) render do DESTINO com os pins == conjunto declarado · (d) frescor da origem + probe autenticado no ECR + tag \`${DST_ENV}-\` no MESMO digest, conferida ANTES do pin · (e) esta evidencia."
+          } >> "$GITHUB_STEP_SUMMARY"

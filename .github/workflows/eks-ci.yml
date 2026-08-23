@@ -1,0 +1,90 @@
+# CI da esteira EKS — NOVA, paralela. Nao substitui nem toca `ci.yml`,
+# `build-images.yml` ou `deploy-tenant.yml`: o repo continua entregando em ECS
+# ate o cutover, e esta lane so olha para `deploy/**` e para os proprios
+# workflows `eks-*`.
+#
+# O que ela prova, em ordem de consequencia:
+#   1. o chart RENDERIZA nos tres ambientes com pins validos;
+#   2. o chart FALHA FECHADO com o placeholder (branch nunca buildada);
+#   3. a schema REPROVA as seis formas de errar que ja custaram incidente na
+#      frota (segredo literal, servico sem readiness, preset+resources, digest
+#      que e tag, repositorio fora do ECR do produto, certificate-arn no app);
+#   4. o render nao contem `kind: Secret` nem `imagePullSecrets`, e o conjunto
+#      de imagens renderizado e exatamente o declarado;
+#   5. os scripts da esteira (pin, gate, lista) se comportam — inclusive
+#      REPROVANDO o que tem de reprovar;
+#   6. os workflows sao validos (actionlint) e nenhum segredo entrou no git
+#      (gitleaks).
+name: eks-ci
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/**'
+      - '.github/workflows/eks-*.yml'
+  push:
+    branches: ['eks/**']
+
+concurrency:
+  group: eks-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contrato:
+    name: contrato do chart e dos scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # gitleaks varre os COMMITS, nao so o diff; e o teste do pin cria
+          # clones locais a partir deste working tree.
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
+        with:
+          version: v3.16.3
+
+      # deploy/services.sh le o YAML de verdade (nao regex). PyYAML ja vem na
+      # imagem do runner; a linha abaixo e o cinto para o dia em que nao vier.
+      - name: garantir PyYAML
+        run: python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check --quiet 'pyyaml==6.0.2'
+
+      - name: testes da esteira
+        run: bash deploy/__tests__/run-all.sh
+
+      - name: instalar actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/actionlint.tgz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/actionlint.tgz -C /tmp actionlint
+          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+          actionlint --version
+
+      # SO os workflows desta esteira. Rodar actionlint no repo inteiro faria
+      # esta lane nova reprovar por causa dos workflows antigos, que ela nao
+      # tem mandato para mexer.
+      - name: actionlint (workflows eks-*)
+        run: actionlint .github/workflows/eks-ci.yml .github/workflows/eks-deploy-dev.yml .github/workflows/eks-deploy-homolog.yml .github/workflows/eks-deploy-main.yml
+
+      - name: instalar gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      # `--no-banner` e saida ruidosa de menos, nao protecao de menos: o exit
+      # code e o gate. `detect` varre o historico; `--redact` garante que um
+      # achado nao vire vazamento no log publico da execucao.
+      - name: gitleaks
+        run: gitleaks detect --no-banner --redact --exit-code 1
