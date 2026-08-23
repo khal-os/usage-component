@@ -12,6 +12,23 @@ PINS="${FIX}/pins-valid.yaml"
 
 ns_de() { case "$1" in prod) echo kos-components ;; *) echo "kos-components-$1" ;; esac; }
 
+# doc_de <kind> <metadata.name> — recorta UM documento do render (stdin). O awk
+# por `kind:` + primeiro `---` nao serve aqui: precisamos do ExternalSecret do
+# `migrations`, que nao e o primeiro da lista.
+doc_de() {
+  awk -v k="$1" -v n="$2" '
+    function fecha() { if (kind && nome) { printf "%s", buf; achou=1; exit } buf=""; kind=0; nome=0 }
+    /^---$/ { fecha(); next }
+    { buf = buf $0 "\n" }
+    $0 == "kind: " k     { kind = 1 }
+    $0 == "  name: " n   { nome = 1 }
+    END { fecha() }
+  '
+}
+
+# wave_de <documento> — le a sync-wave (com ou sem aspas) das annotations
+wave_de() { sed -n 's/.*argocd\.argoproj\.io\/sync-wave: *"\{0,1\}\(-\{0,1\}[0-9]\{1,\}\)"\{0,1\}.*/\1/p' <<<"$1" | head -1; }
+
 render() { # render <env> [values extra...]
   local env="$1"; shift
   helm template kos-components deploy/chart --namespace "$(ns_de "$env")" \
@@ -121,6 +138,48 @@ for chave in "creationPolicy: Owner" "deletionPolicy: Retain" "conversionStrateg
   contem "ExternalSecret: ${chave}" "$chave" "$ES"
 done
 verifica "um ExternalSecret por workload habilitado (4)" "4" "$(grep -c '^kind: ExternalSecret$' <<<"$DEV")"
+
+titulo "ES de workload comum: sem hook, sem wave, creationPolicy Owner"
+ES_API="$(doc_de ExternalSecret api-env <<<"$DEV")"
+contem "api-env existe"            "name: api-env"     "$ES_API"
+contem "api-env com Owner"         "creationPolicy: Owner" "$ES_API"
+nao_contem "api-env sem hook"      "argocd.argoproj.io/hook" "$ES_API"
+
+titulo "ORDEM PreSync: o ES do Job de migracao e hook numa wave ANTERIOR a do Job"
+# A regressao que este bloco fecha: com o ES como recurso COMUM, ele so era
+# aplicado na fase SYNC — que nunca comeca, porque a fase PreSync esta parada
+# esperando o Job que precisa justamente daquele Secret. No primeiro sync de cada
+# ambiente o pod do hook ficava em CreateContainerConfigError ate os 600 s do
+# activeDeadlineSeconds e derrubava o sync inteiro. Deadlock de fase, nao flake.
+for env in dev hml prod; do
+  ES_MIG="$(doc_de ExternalSecret migrations-env <<<"${RENDER[$env]}")"
+  JOB_MIG="$(doc_de Job migrations <<<"${RENDER[$env]}")"
+  contem "${env}: ES do migrations e hook PreSync" "argocd.argoproj.io/hook: PreSync" "$ES_MIG"
+  contem "${env}: ES do migrations nao e apagado antes da hora" \
+    "argocd.argoproj.io/hook-delete-policy: BeforeHookCreation" "$ES_MIG"
+  # `Orphan` e o que impede o hook-delete-policy de levar o SECRET junto: com
+  # `Owner` o ESO poe ownerReference, e apagar o ES apagaria o Secret que o Job
+  # le. Ver o comentario do template.
+  contem "${env}: ES do migrations com creationPolicy Orphan" "creationPolicy: Orphan"  "$ES_MIG"
+  contem "${env}: ES do migrations com deletionPolicy Retain" "deletionPolicy: Retain"  "$ES_MIG"
+  W_ES="$(wave_de "$ES_MIG")"; W_JOB="$(wave_de "$JOB_MIG")"
+  verifica "${env}: wave do ES do migrations" "-1" "$W_ES"
+  verifica "${env}: wave do Job de migracao"   "0" "$W_JOB"
+  if [ -n "$W_ES" ] && [ -n "$W_JOB" ] && [ "$W_ES" -lt "$W_JOB" ]; then
+    ok "${env}: o Secret nasce numa wave ANTES do hook que o consome"
+  else
+    falha "${env}: wave do ES (${W_ES:-<vazia>}) nao e menor que a do Job (${W_JOB:-<vazia>})"
+  fi
+  contem "${env}: o Job consome mesmo esse Secret" "name: migrations-env" "$JOB_MIG"
+done
+
+titulo "o chart RECUSA ES do Job na mesma wave (ou depois) do Job"
+if OUT="$(render dev -f "$PINS" -f "${FIX}/bad-es-wave.yaml" 2>&1)"; then
+  falha "bad-es-wave.yaml renderizou (deveria falhar: ES e Job na mesma wave)"
+else
+  contem "a mensagem explica a ordem" "tem de ser MENOR que a do Job" "$OUT"
+  contem "e cita o sintoma real"      "CreateContainerConfigError"    "$OUT"
+fi
 
 titulo "servico SEM secrets nao falha ABERTO"
 # Sem `secrets:` nao ha ExternalSecret; um `envFrom` (ou uma annotation de

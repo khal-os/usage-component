@@ -19,6 +19,16 @@ com o "porque" em D10-D13 e os follow-ups em PENDENTE-10/11/12:
 | dependencia do worker no LangWatch reprovava um deploy correto da api | `deploy/values.yaml`, `deploy/values-dev.yaml` | ordem declarada como pre-requisito BLOQUEANTE (PENDENTE-10) |
 | referencia cruzada errada (`PENDENTE-4` no lugar de `PENDENTE-5`) | `deploy/values.yaml` | corrigida |
 
+**Segundo passe de correcao (2026-08-23, tarde)** — dois achados de ORDEM, o
+"porque" em D14-D15, e as premissas de nome reunidas na secao 3:
+
+| achado | onde | correcao |
+| --- | --- | --- |
+| o gate lia `.status.sync.revision`, que a Application **multi-source** deixa VAZIO: o criterio nunca era satisfeito, o deadline de 900 s queimava e um deploy CORRETO era reprovado | `deploy/verify-argo.sh` | casa o INDICE da source pelo `repoURL` deste repo e le `.status.sync.revisions[i]`; single-source continua no campo antigo (D14) |
+| o `ExternalSecret` do Job de migracao era recurso COMUM: fase SYNC so comeca depois do PreSync, entao o hook subia com `envFrom` de um Secret que nunca chegaria — `CreateContainerConfigError` ate os 600 s e sync parado | `deploy/chart/templates/externalsecret.yaml` | o ES do Job vira hook da MESMA fase, uma wave ANTES (`-1` x `0`), `hook-delete-policy: BeforeHookCreation` + `creationPolicy: Orphan` para a delecao do hook nao levar o Secret junto (D15) |
+| `default` do sprig trata `0` como vazio: uma `syncWave: 0` declarada a mao virava `-1` em silencio | `deploy/chart/templates/externalsecret.yaml` | leitura por `hasKey`, e o chart REPROVA wave do ES `>=` wave do Job (fixture `bad-es-wave.yaml`) (D15) |
+| premissas de nome (bucket, DB, ARN) espalhadas pelos PENDENTES | `deploy/README-STREAM.md` | tabela **assumido vs CONTRATO** (secao 3) — nenhum nome novo foi inventado |
+
 ---
 
 ## 1. O que foi entregue
@@ -34,7 +44,8 @@ deploy/
       deployment.yaml           Deployment por servico (probes, Reloader, envFrom, non-root, tmpDir)
       service.yaml              ClusterIP so para quem expoe porta
       serviceaccount.yaml       SA por workload; annotation IRSA quando declarado
-      externalsecret.yaml       1 ExternalSecret por workload, N `extract`, defaults do CRD explicitos
+      externalsecret.yaml       1 ExternalSecret por workload, N `extract`, defaults do CRD explicitos;
+                                o ES de Job de hook e ele proprio hook, uma wave antes do Job (D15)
       ingress.yaml              1 Ingress por host, IngressGroup do ambiente, SEM certificate-arn
       networkpolicy.yaml        borda (ipBlock das subnets do ALB) + egress (DNS/443/extraEgress)
       pdb.yaml                  PDB quando replicas>1 ou strategy Recreate
@@ -49,10 +60,11 @@ deploy/
   values.schema.json            symlink -> chart/values.schema.json (ver Decisao D2)
   services.sh                   a lista: images / matrix / repos / workloads (+ guard de coerencia)
   gitops-pin.sh                 escreve o BLOCO de pins e commita (1 arquivo, guards de render)
-  verify-argo.sh                o gate: Synced+Healthy+revision+CONJUNTO de digests de pod permanente, sem skip (D10)
+  verify-argo.sh                o gate: Synced+Healthy+revisao da source DESTE repo (multi-source, D14)
+                                +CONJUNTO de digests de pod permanente, sem skip (D10)
   bootstrap-eks-repo.sh         branches eks/*, vars, Environment prod-eks, auditoria (dry-run)
-  __tests__/                    5 suites, 186 asserces (run-all.sh)
-    fixtures/                   pins validos + 6 fixtures INVALIDAS (uma por forma de errar)
+  __tests__/                    5 suites, 260 asserces (run-all.sh)
+    fixtures/                   pins validos + 8 fixtures INVALIDAS (uma por forma de errar)
 .github/workflows/
   eks-ci.yml                    contrato do chart + scripts + actionlint + gitleaks
   eks-deploy-dev.yml            UNICA lane que builda (matrix de 3 imagens) -> pin -> gate
@@ -67,7 +79,7 @@ deploy/
 | `api` | Deployment | `usage-module` | 1 dev/hml, **2 prod** | RollingUpdate (surge 1 / unavail 0) | http `/api/v1/docs/openapi.json` | 30 s | Ingress `api-<env>.hapvida.khal.ai`, preset M, PDB em prod |
 | `trace-ingestion-worker` | Deployment | `usage-connector` | 1 | **Recreate** | exec `stat /tmp/trace-ingestion-heartbeat` | 60 s | PDB `maxUnavailable: 1` (D11), egress 8123 -> `kos-langwatch-<hml\|prod>`; unicidade garantida por `Recreate` + `replicas: 1` + schema |
 | `billing-close-scheduler` | Deployment | `usage-module` | 1 | **Recreate** | exec `stat /tmp/billing-close-heartbeat` | 60 s | **`enabled: false`** por padrao (decisao 131 e opt-in) |
-| `migrations` | Job (hook **PreSync**) | `usage-module` | — | — | exit 0 | 30 s | `backoffLimit: 0`, `activeDeadlineSeconds: 600` |
+| `migrations` | Job (hook **PreSync**, wave `0`) | `usage-module` | — | — | exit 0 | 30 s | `backoffLimit: 0`, `activeDeadlineSeconds: 600`; o ES dele e hook PreSync wave `-1` (D15) |
 | `backup` | CronJob | `usage-db-backup` | — | — | exit 0 | — | `0 7 * * *` tz `America/Sao_Paulo`, `restartPolicy: Never`, IRSA `hv-kos-usage-backup-<env>` |
 
 Secrets (ESO, `dataFrom.extract`, "point, don't copy"):
@@ -205,9 +217,102 @@ depois do retag no ECR nas de promocao. Com repositorio IMMUTABLE, uma tag
 publicada durante um freeze nao se desfaz. Agora cada lane le o `HOLD` antes de
 assumir a role de OIDC — asserido por ordem de linha no teste das lanes.
 
+**D14 — o gate le a revisao da SOURCE deste repo, nao `.status.sync.revision`.**
+As Applications do CONTRATO §3 sao **multi-source**: source do repo do app
+(`path: deploy/chart`) + source do `khal-deploy` (os values, entrando como
+`ref`). Nesse formato o Argo **nao preenche** `.status.sync.revision` — ele
+publica uma revisao POR SOURCE em `.status.sync.revisions[]`, na mesma ordem de
+`.spec.sources[]`. O gate lia o campo singular: string vazia, criterio 3 nunca
+satisfeito, 900 s de deadline queimados e REPROVACAO de um deploy que estava
+certo. E o pior tipo de falso vermelho, porque parece problema de cluster e
+manda o plantao procurar no lugar errado.
+Correcao: o script resolve UMA vez o **indice** da source cujo `repoURL` e o
+deste repo (regex `ARGOCD_APP_REPO_MATCH`, default `usage-component`, casada em
+minusculas e sem o `.git` final) e le `revisions[<i>]`. Casar por indice e o
+ponto: a revisao da outra source e um commit do `khal-deploy`, de outro git —
+comparar aquilo com o nosso pin seria comparar coisas diferentes e aprovar por
+coincidencia (o mesmo repo de values serve varios apps). Quando ha mais de uma
+source do mesmo repo, ganha a que NAO e mera `ref` e que carrega chart
+(`path`/`chart`) — a que o Argo de fato renderiza. Application single-source
+continua caindo em `.status.sync.revision`; a leitura e uma so, com fallback, e
+**vazio nunca vale** (nem `null`, nem `""`). Se nenhuma source casar o repo, o
+gate FALHA na hora listando os `repoURL` declarados — nao ha aprovacao por
+ausencia de criterio. `operationState` recebe o mesmo tratamento
+(`syncResult.revisions[i]`), senao a falha-rapida da operacao pinada nunca
+dispararia em multi-source.
+Provado nos dois formatos: aprova single-source; aprova multi-source com
+`revision: ""` e `revisions[i]` correta, com a source do repo no indice 1 **e**
+no indice 0; REPROVA quando so a source de values casa o pin; REPROVA quando
+`revisions` nem existe; FALHA quando nenhuma source e deste repo.
+
+**D15 — o ExternalSecret de um Job de hook e, ele proprio, um hook.**
+O Job de migracao e hook `PreSync` e le `/hapvida/<env>/kos/components/{app,mongo}`
+por `envFrom` do Secret `migrations-env`. Esse Secret nasce de um
+`ExternalSecret` — que era um recurso **comum**, ou seja, da fase **SYNC**. E a
+fase SYNC so comeca depois que os hooks PreSync terminam. No primeiro sync de
+cada ambiente o pod do hook subia com `envFrom` de um Secret que ainda nao
+existia e — pior — que nunca chegaria: `CreateContainerConfigError` ate os 600 s
+de `activeDeadlineSeconds`, Job falhado, fase PreSync reprovada, sync inteiro
+parado. Nao e flake nem corrida: e deadlock de fase, deterministico.
+*Por que nao (a) ES comum + initContainer esperando o Secret*: o initContainer
+esperaria pelo mesmo Secret que a fase SYNC — que nao roda enquanto o PreSync
+nao terminar. Troca `CreateContainerConfigError` por `Init:0/1` e mantem o
+deadlock inteiro.
+*Por que nao (c) backoff maior + retry do Argo*: o retry reinicia a operacao **na
+fase PreSync**; o ES continua do outro lado da fronteira. Deadlock igual, so que
+repetido — e ainda custaria o `backoffLimit: 0`, que existe para migracao falhada
+ser diagnostico e nao ser re-tentada sozinha.
+*Escolhido (b), com uma emenda*: o ES do Job entra na MESMA fase do Job
+(`argocd.argoproj.io/hook: PreSync`) numa **sync-wave anterior** (ES `-1`, Job
+`0`). O Argo so abre a wave seguinte quando a anterior esta saudavel, e o Argo CD
+tem health check nativo para `external-secrets.io/ExternalSecret` (condicao
+`Ready`) — a wave 0 so abre com o Secret materializado. A emenda e o
+`creationPolicy`: com `Owner` o ESO poe `ownerReference` no Secret, e o
+`hook-delete-policy: BeforeHookCreation` (que e o padrao, e o que se quer, para
+o objeto do sync anterior ficar legivel ate o proximo) apagaria o ES e, por
+cascata, o **proprio Secret que o Job precisa ler**. Por isso, e so no ES de
+hook, `creationPolicy: Orphan`: a delecao do hook nunca alcanca o Secret, ele
+sobrevive entre syncs, o ESO continua atualizando enquanto o ES existe, e o Job
+encontra credencial valida mesmo se o ESO estiver indisponivel no instante do
+sync. `deletionPolicy: Retain` continua, como manda o CONTRATO §4. Os
+ExternalSecrets de Deployment e CronJob **nao mudaram**: sem hook, sem wave,
+`creationPolicy: Owner`.
+*O preco, declarado*: esse Secret nao e coletado quando a Application e apagada
+(sem `ownerReference` nao ha GC) — ele some com o namespace. Registrado em
+PENDENTE-13.
+*Guarda*: o chart REPROVA `esSyncWave >= syncWave` com a mensagem do sintoma
+(fixture `bad-es-wave.yaml`), e a leitura das waves e por `hasKey`, porque o
+`default` do sprig trata `0` como vazio e transformava uma wave 0 declarada a
+mao em `-1` calado. Teste de render nos tres ambientes: hook, delete-policy,
+`Orphan`, `Retain`, wave do ES **estritamente menor** que a do Job, e o Job
+apontando para aquele mesmo Secret.
+
 ---
 
-## 3. Como validar (nenhum comando toca nuvem)
+## 3. Assumido vs CONTRATO (o que o reconciliador tem de bater)
+
+Nenhum nome novo foi inventado nesta correcao — a tabela e um INVENTARIO do que
+ja esta nos `deploy/values-<env>.yaml`, separando o que o CONTRATO fixa do que
+esta stream teve de assumir porque o contrato nao nomeia. Os canonicos virao do
+reconciliador; enquanto isso os valores atuais ficam.
+
+| chave (onde vive) | assumido aqui — dev / hml / prod | o que o CONTRATO diz | veredito |
+| --- | --- | --- | --- |
+| `secretsPathPrefix` (`values-<env>.yaml`) | `/hapvida/dev/kos/components` · `/hapvida/hml/kos/components` · `/hapvida/prod/kos/components` | §4: paths `/hapvida/<env>/kos/components/{app,mongo,langwatch}` | **CONFERE** — derivado do contrato, nao assumido |
+| `externalSecrets.storeName` (`values-<env>.yaml`) | `hapvida-dev` · `hapvida-dev` · `hapvida-prod` | §1/§4: `ClusterSecretStore hapvida-dev` na conta 701 e `hapvida-prod` na 652; o CSS e por CLUSTER, e hml coabita a 701 | **CONFERE** — hml usar `hapvida-dev` e consequencia da coabitacao (§0.6), nao um nome novo |
+| host do Ingress da api (`values-<env>.yaml`) | `api-dev.hapvida.khal.ai` · `api-hml.hapvida.khal.ai` · `api.hapvida.khal.ai` | §3, linha "usage api" da tabela de hosts | **CONFERE** |
+| `ingressDefaults.groupName` (`values-<env>.yaml`) | `hapvida-dev` · `hapvida-hml` · `hapvida-prod` | §1/§3: IngressGroups por ambiente | **CONFERE** |
+| `cronjobs.backup.serviceAccount.irsaRoleArn` (`values-<env>.yaml`) | `arn:aws:iam::701016785827:role/hv-kos-usage-backup-dev` · `…-hml` · `arn:aws:iam::652197205677:role/hv-kos-usage-backup-prod` | §8 nomeia a **role** `hv-kos-usage-backup-<env>`; §1 da as contas. O ARN completo nunca e escrito no contrato | **ASSUMIDO (composicao)** — a role e criada pelo modulo `kos-client-foundation` (stream A). Se o modulo prefixar/sufixar diferente, muda 1 linha por `values-<env>.yaml`; **falha VISIVEL** (o pod do backup nao assume a role) |
+| `BACKUP_BUCKET` (`values-<env>.yaml`) | `hv-kos-usage-backup-dev` · `-hml` · `-prod` | o CONTRATO **nao nomeia** o bucket de backup do usage (so o do LangWatch, `hv-kos-langwatch-<env>-objects`, §9) | **ASSUMIDO** — canonico vem do `kos-client-foundation`. Nome errado **nao falha ruidosamente**: ou o `PutObject` nega, ou o backup arquiva no lugar errado |
+| `MONGO_USAGE_DB_NAME` (`values-<env>.yaml`) | `hapvida_dev` · `hapvida_hml` · `hapvida` | o CONTRATO **nao define**; §8 so cita o modulo `atlas-usage`. PLANO §4.3: dev e hml dividem o cluster Atlas de hml, logo os bancos TEM de diferir | **ASSUMIDO** — canonico vem do `atlas-usage`. Nome errado nao falha: **arquiva no banco errado** (a decisao 139 exige o nome DECLARADO justamente por isso) |
+| `LANGWATCH_PROJECT_ID` (JSON `/hapvida/<env>/kos/components/langwatch`) | no Secrets Manager, junto de `LANGWATCH_CLICKHOUSE_PASSWORD` | §4 lista o parametro **SSM** `/hapvida/<env>/kos/components/langwatch-project-id` | **DIVERGENCIA DECLARADA** — nao ha CSS de ParameterStore nem `ssm:GetParameter` na policy do ESO (PENDENTE-2); some com uma linha em `secrets:` quando existirem |
+
+Onde cada um aparece, para a troca ser mecanica:
+`grep -n "secretsPathPrefix\|storeName\|irsaRoleArn\|BACKUP_BUCKET\|MONGO_USAGE_DB_NAME\|host:" deploy/values-{dev,hml,prod}.yaml`.
+
+---
+
+## 4. Como validar (nenhum comando toca nuvem)
 
 ```bash
 cd ~/Deploy/Platform/repos/usage-component
@@ -225,6 +330,20 @@ helm template kos-components deploy/chart --namespace kos-components-dev \
 # prova de que o placeholder falha fechado (SEM a fixture)
 helm template kos-components deploy/chart --namespace kos-components-dev \
   -f deploy/values.yaml -f deploy/values-dev.yaml    # -> erro "PLACEHOLDER"
+
+# a ordem do hook (D15): o ES do migrations tem de sair na wave -1 e o Job na 0
+for e in dev hml prod; do
+  ns=kos-components-$e; [ "$e" = prod ] && ns=kos-components
+  helm template kos-components deploy/chart --namespace "$ns" \
+    -f deploy/values.yaml -f "deploy/values-${e}.yaml" \
+    -f deploy/__tests__/fixtures/pins-valid.yaml | grep -c 'sync-wave: "-1"'
+done                                                # -> 1, 1, 1
+
+# prova de que o chart RECUSA o ES na mesma wave do Job
+helm template kos-components deploy/chart --namespace kos-components-dev \
+  -f deploy/values.yaml -f deploy/values-dev.yaml \
+  -f deploy/__tests__/fixtures/pins-valid.yaml \
+  -f deploy/__tests__/fixtures/bad-es-wave.yaml     # -> erro "MENOR que a do Job"
 
 # lanes e segredos
 actionlint .github/workflows/eks-*.yml
@@ -244,18 +363,28 @@ Ferramentas: `helm v3.16.3`, `node v22.22.3`, `actionlint 1.7.12`,
 `gitleaks 8.21.2`, `python3 3.12.3 + PyYAML 6.0.1`, `jq 1.7`.
 
 ```
-$ bash deploy/__tests__/run-all.sh              # apos as correcoes da revisao
+$ bash deploy/__tests__/run-all.sh              # apos o SEGUNDO passe (D14/D15)
 ############ services ############
 -- services: 15 ok, 0 falha(s)
 ############ chart-contract ############
--- chart-contract: 69 ok, 0 falha(s)
+-- chart-contract: 98 ok, 0 falha(s)
 ############ gitops-pin ############
 -- gitops-pin: 27 ok, 0 falha(s)
 ############ verify-argo ############
--- verify-argo: 21 ok, 0 falha(s)
+-- verify-argo: 36 ok, 0 falha(s)
 ############ lanes ############
 -- lanes: 84 ok, 0 falha(s)
-TODAS as suites passaram.                       (216 asserces)
+TODAS as suites passaram.                       (260 asserces)
+
+  · as 15 asserces novas de `verify-argo` cobrem os DOIS formatos de Application:
+    single-source (`.status.sync.revision`) e multi-source (`revisions[i]`, com a
+    source do repo no indice 1 e no indice 0, reprovando quando so a source de
+    values casa o pin, quando `revisions` nem existe, e falhando quando nenhuma
+    source e deste repo);
+  · as 29 novas de `chart-contract` cobrem a ordem PreSync do ExternalSecret do
+    Job nos tres ambientes (hook, wave -1 < wave 0, BeforeHookCreation, Orphan,
+    Retain), o ES de workload comum inalterado (sem hook, `Owner`) e a recusa de
+    `esSyncWave >= syncWave`.
 
 $ helm lint deploy/chart -f deploy/values.yaml -f deploy/values-dev.yaml -f deploy/__tests__/fixtures/pins-valid.yaml
 ==> Linting deploy/chart
@@ -267,6 +396,18 @@ dev :  1 CronJob  2 Deployment  4 ExternalSecret  1 Ingress  1 Job  5 NetworkPol
 hml :  1 CronJob  2 Deployment  4 ExternalSecret  1 Ingress  1 Job  5 NetworkPolicy  1 PDB  1 Service  4 ServiceAccount
 prod:  1 CronJob  2 Deployment  4 ExternalSecret  1 Ingress  1 Job  5 NetworkPolicy  2 PDB  1 Service  4 ServiceAccount
   (0 `kind: Secret`, 0 `imagePullSecrets` nos tres — asserido pelo teste)
+
+$ … | grep -B2 sync-wave        # a ordem do hook, nos tres ambientes
+Job/migrations           hook: PreSync  hook-delete-policy: BeforeHookCreation  sync-wave: "0"
+ExternalSecret/migrations-env  hook: PreSync  hook-delete-policy: BeforeHookCreation  sync-wave: "-1"
+                               target: creationPolicy: Orphan  deletionPolicy: Retain
+ExternalSecret/{api,trace-ingestion-worker,backup}-env  sem hook, sem wave, creationPolicy: Owner
+
+$ helm template … -f deploy/__tests__/fixtures/bad-es-wave.yaml   # ES na wave do Job
+Error: execution error at (kos-components/templates/externalsecret.yaml:99:4):
+job 'migrations': a sync-wave do ExternalSecret (0) tem de ser MENOR que a do Job
+(0) — senao o hook sobe antes do Secret existir e o pod trava em
+CreateContainerConfigError ate o activeDeadlineSeconds
 
 $ helm template … sem a fixture de pins        # prova de fail-closed
 Error: execution error at (kos-components/templates/job-migrations.yaml:…):
@@ -288,13 +429,15 @@ $ git diff --name-status origin/main -- . | awk '$1 != "A"'
 (vazio — nada pre-existente foi modificado ou removido)
 ```
 
-O que as **7** fixtures invalidas provam que a `values.schema.json` REPROVA:
+O que as fixtures invalidas provam que a `values.schema.json` REPROVA:
 segredo literal em `envOverride` (`MONGO_DB_PASSWORD`), servico sem
 `health.readiness`, `preset` junto de `resources`, "digest" que e uma tag,
 repositorio fora de `<conta>.dkr.ecr.<regiao>.amazonaws.com/kos/<nome>`,
 `certificate-arn` nas annotations do Ingress do app, e — nova — **`replicas > 1`
 num servico `strategy: Recreate`** (`bad-recreate-replicas.yaml`), que era o
-risco 3 do PLANO §7 passando calado.
+risco 3 do PLANO §7 passando calado. A oitava, `bad-es-wave.yaml`, e a unica
+reprovada pelo CHART e nao pela schema: `esSyncWave` igual a `syncWave` poe o
+ExternalSecret e o Job de hook na mesma wave, que e o deadlock de fase de D15.
 Ha ainda uma fixture VALIDA, `svc-sem-secrets.yaml`: um servico sem `secrets:`,
 usada para provar que o chart nao falha ABERTO nesse caso (sem ExternalSecret
 nao pode haver `envFrom` de um Secret que ninguem cria).
@@ -307,7 +450,7 @@ tags das actions nos SHAs de 40 hex que os workflows pinam.
 
 ---
 
-## 4. PENDENTES
+## 5. PENDENTES
 
 **PENDENTE-1 — health contract do modulo (`/healthz`, `/readyz`, `/api/version`).**
 Nao implementado. O CONTRATO §5 permite "usar o que existe e registrar
@@ -339,12 +482,14 @@ placeholder do SSM era `" "`), e sem ele o worker fica **ocioso** em vez de
 ingerir errado. O comportamento e seguro; a omissao e visivel no log de boot.
 
 **PENDENTE-3 — nomes de bucket e de role de IRSA a confirmar com a stream A.**
+(Linha `BACKUP_BUCKET` e linha do `irsaRoleArn` na tabela da secao 3.)
 `BACKUP_BUCKET=hv-kos-usage-backup-<env>` foi ASSUMIDO (o CONTRATO §8 nomeia a
 role `hv-kos-usage-backup-<env>` mas nao o bucket). Se o modulo
 `kos-client-foundation` batizar diferente, muda uma linha em cada
 `values-<env>.yaml`.
 
 **PENDENTE-4 — `MONGO_USAGE_DB_NAME` por ambiente.**
+(Linha `MONGO_USAGE_DB_NAME` na tabela da secao 3.)
 `hapvida_dev` / `hapvida_hml` / `hapvida` foi ASSUMIDO: dev e hml compartilham o
 cluster Atlas de hml (PLANO §4.3), entao os bancos precisam diferir. Confirmar
 com o modulo `atlas-usage` (stream A) — a decisao 139 exige o nome DECLARADO, e
@@ -421,9 +566,21 @@ inocuo (enforcement de NetworkPolicy desligado nos dois clusters), e por isso na
 foi estreitado no escuro — o alvo certo sao os `/32` do VPC endpoint, que a
 stream A cria. Quando o PrivateLink existir, e uma linha por `values-<env>.yaml`.
 
+**PENDENTE-13 — o Secret `migrations-env` nao e coletado com a Application.**
+Consequencia declarada de D15: o `ExternalSecret` do Job de migracao e hook e usa
+`creationPolicy: Orphan`, entao o Secret que ele materializa nao tem
+`ownerReference` e sobrevive a delecao da Application. Era o preco a pagar — com
+`Owner`, o `hook-delete-policy: BeforeHookCreation` apagaria o Secret junto com o
+hook, que e exatamente o bug que D15 conserta. Efeito pratico: apagar
+`hv-kos-components-<env>` deixa um Secret com credencial de Mongo no namespace
+ate alguem apagar o namespace. *Caminho*: se algum dia isso incomodar, o alvo e
+um segundo ES **comum** (`Owner`) para o mesmo path, so para dar dono ao Secret —
+custa um objeto a mais e nao muda a ordem; nao vale a pena antes de existir um
+procedimento de "desativar ambiente".
+
 ---
 
-## 5. Ordem de armar (quando a fase de publicacao abrir)
+## 6. Ordem de armar (quando a fase de publicacao abrir)
 
 1. Stream A cria os tres repositorios ECR em `278522730053` (IMMUTABLE,
    scanOnPush, repository policy de pull para `701016785827` e `652197205677`) e

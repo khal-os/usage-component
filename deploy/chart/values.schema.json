@@ -311,6 +311,10 @@
         "hook": { "type": "string", "enum": ["PreSync", "Sync", "PostSync", "SyncFail"] },
         "hookDeletePolicy": { "type": "string" },
         "syncWave": { "type": ["string", "integer"] },
+        "esSyncWave": {
+          "type": ["string", "integer"],
+          "description": "sync-wave do ExternalSecret do proprio Job (default: syncWave - 1). O chart REPROVA um valor >= syncWave: um Job de hook le o Secret por envFrom, e o ES tem de estar Ready numa wave ANTERIOR — senao o pod trava em CreateContainerConfigError ate o activeDeadlineSeconds e derruba a fase PreSync inteira."
+        },
         "backoffLimit": { "type": "integer", "minimum": 0, "maximum": 0 },
         "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
         "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },

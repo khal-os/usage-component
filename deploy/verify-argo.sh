@@ -13,7 +13,16 @@
 #   1. .status.sync.status   == Synced
 #   2. .status.health.status == Healthy   (Synced != Healthy: Synced diz que o
 #      cluster recebeu o manifesto, nao que o pod subiu)
-#   3. .status.sync.revision == o SHA do commit de pin
+#   3. a revisao sincronizada == o SHA do commit de pin. ATENCAO: numa
+#      Application MULTI-SOURCE (CONTRATO §3: source 1 = este repo, source 2 =
+#      khal-deploy com os values) o Argo deixa `.status.sync.revision` VAZIO e
+#      publica uma revisao POR SOURCE em `.status.sync.revisions[]`, na MESMA
+#      ordem de `.spec.sources[]`. Ler `revision` ali daria "" para sempre: o
+#      gate queimaria os 900 s e REPROVARIA um deploy correto. O script casa o
+#      INDICE da source cujo `repoURL` e o DESTE repo (a outra carrega so
+#      values, e a revisao dela e de outro git — comparar com o nosso pin seria
+#      comparar coisas diferentes) e le `revisions[<i>]`; Application
+#      single-source continua caindo em `.status.sync.revision`.
 #   4. TODOS os repo@digest de workload de POD PERMANENTE (Deployment,
 #      StatefulSet, DaemonSet) aparecem em .status.summary.images (estado VIVO).
 #      Conjunto, nao amostra: este repo tem 3 imagens e 5 workloads; conferir
@@ -52,6 +61,11 @@ cd "$RAIZ"
 ARGOCD_SERVER="${ARGOCD_SERVER:-https://argo.namastex.io}"
 DEADLINE_SECONDS="${ARGOCD_VERIFY_DEADLINE_SECONDS:-900}"
 INTERVAL_SECONDS="${ARGOCD_VERIFY_INTERVAL_SECONDS:-10}"
+# Como se reconhece, dentro de `.spec.sources[]`, a source que e ESTE repo.
+# Regex casada contra o `repoURL` em minusculas e sem o `.git` final — serve
+# tanto para `https://github.com/khal-os/usage-component.git` quanto para
+# `git@github.com:khal-os/usage-component`.
+APP_REPO_MATCH="${ARGOCD_APP_REPO_MATCH:-usage-component}"
 
 erro()  { echo "::error::verify-argo: $*" >&2; }
 morre() { erro "$*"; exit 1; }
@@ -180,6 +194,59 @@ busca_app() {
   CORPO="${bruto%$'\n'*}"
 }
 
+# ── qual source e a nossa, e qual revisao e a dela ──────────────────────────
+# Desempate quando mais de uma source aponta para este repo (o padrao `ref` do
+# Argo permite): fica a que NAO e mera referencia (`ref:`) e que carrega chart
+# (`path`/`chart`) — e a source que o Argo de fato renderiza.
+JQ_INDICE='
+def norm: (. // "") | ascii_downcase | sub("\\.git$"; "");
+[ (.spec.sources // []) | to_entries[] | select((.value.repoURL | norm) | test($m)) ] as $c
+| if ($c | length) == 0 then ""
+  else
+    ([ $c[] | select(((.value.ref // "") | length) == 0) ]) as $sem_ref
+    | (if ($sem_ref | length) > 0 then $sem_ref else $c end) as $p
+    | ([ $p[] | select((((.value.path // "") | length) > 0) or (((.value.chart // "") | length) > 0)) ]) as $q
+    | (if ($q | length) > 0 then $q else $p end) | .[0].key | tostring
+  end'
+
+# `revisions[i]` primeiro, `revision` como fallback: a mesma leitura serve para
+# a Application single-source (que nao tem `revisions`) e para a multi-source
+# (que tem `revision` vazio). Vazio nunca "vale": `nz` descarta null E "" para
+# a string vazia da multi-source nao ser confundida com uma revisao lida.
+JQ_REV='
+def nz: select(. != null and . != "");
+[ ((.status.sync.revisions // [])[$i] | nz), (.status.sync.revision | nz) ] | (.[0] // "")'
+
+JQ_OP_REV='
+def nz: select(. != null and . != "");
+[ ((.status.operationState.syncResult.revisions // [])[$i] | nz),
+  ((.status.operationState.operation.sync.revisions // [])[$i] | nz),
+  (.status.operationState.syncResult.revision | nz),
+  (.status.operationState.operation.sync.revision | nz) ] | (.[0] // "")'
+
+IDX=0; MULTI=0; CAMPO_REV="sync.revision"; SOURCE_REPO=""; RESOLVIDA=0
+resolve_source() { # le .spec.sources[] UMA vez e fixa o indice usado no resto
+  local n
+  n="$(jq -r '(.spec.sources // []) | length' <<<"$CORPO")"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  if [ "$n" -eq 0 ]; then
+    IDX=0; MULTI=0; CAMPO_REV="sync.revision"; SOURCE_REPO="$(jq -r '.spec.source.repoURL // ""' <<<"$CORPO")"
+    echo "verify-argo: Application single-source — revisao lida de .status.sync.revision${SOURCE_REPO:+ (repo ${SOURCE_REPO})}"
+  else
+    local i
+    i="$(jq -r --arg m "$APP_REPO_MATCH" "$JQ_INDICE" <<<"$CORPO")"
+    if [ -z "$i" ]; then
+      erro "a Application ${APP} tem ${n} sources e NENHUMA casa '${APP_REPO_MATCH}'. As sources declaradas sao:"
+      jq -r '(.spec.sources // []) | to_entries[] | "  [\(.key)] \(.value.repoURL // "<sem repoURL>")\(if (.value.ref // "") != "" then " (ref: \(.value.ref))" else "" end)"' <<<"$CORPO" >&2
+      morre "sem saber QUAL source e a deste repo o gate nao consegue comparar revisao nenhuma com o pin ${PIN_SHA} (ajuste ARGOCD_APP_REPO_MATCH)."
+    fi
+    IDX="$i"; MULTI=1; CAMPO_REV="sync.revisions[${IDX}]"
+    SOURCE_REPO="$(jq -r --argjson i "$IDX" '(.spec.sources // [])[$i].repoURL // ""' <<<"$CORPO")"
+    echo "verify-argo: Application MULTI-SOURCE (${n} sources) — revisao lida de .status.${CAMPO_REV}, source ${IDX} = ${SOURCE_REPO}"
+  fi
+  RESOLVIDA=1
+}
+
 epoch_de() { # RFC3339 -> epoch; vazio/invalido/null -> 0 (nunca satisfaz o criterio)
   local t="${1:-}"
   if [ -z "$t" ] || [ "$t" = "null" ]; then echo 0; return 0; fi
@@ -205,12 +272,13 @@ while :; do
   else
     SYNC="$(jq -r '.status.sync.status      // ""' <<<"$CORPO")"
     HEALTH="$(jq -r '.status.health.status   // ""' <<<"$CORPO")"
-    REVISION="$(jq -r '.status.sync.revision  // ""' <<<"$CORPO")"
+    [ "$RESOLVIDA" = "1" ] || resolve_source
+    REVISION="$(jq -r --argjson i "$IDX" "$JQ_REV" <<<"$CORPO")"
     RECONCILED="$(jq -r '.status.reconciledAt // ""' <<<"$CORPO")"
     IMAGENS="$(jq -r '.status.summary.images // [] | .[]' <<<"$CORPO")"
     if jq -e '.status.operationState != null' >/dev/null 2>&1 <<<"$CORPO"; then
       OP_PHASE="$(jq -r '.status.operationState.phase // ""' <<<"$CORPO")"
-      OP_REV="$(jq -r '.status.operationState.syncResult.revision // .status.operationState.operation.sync.revision // ""' <<<"$CORPO")"
+      OP_REV="$(jq -r --argjson i "$IDX" "$JQ_OP_REV" <<<"$CORPO")"
     else
       OP_PHASE=""; OP_REV=""
     fi
@@ -247,7 +315,7 @@ while :; do
 
     if   [ "$SYNC"   != "Synced" ];     then ULTIMO_MOTIVO="sync.status=${SYNC:-<vazio>} (esperado Synced)"
     elif [ "$HEALTH" != "Healthy" ];    then ULTIMO_MOTIVO="health.status=${HEALTH:-<vazio>} (esperado Healthy)"
-    elif [ "$REVISION" != "$PIN_SHA" ]; then ULTIMO_MOTIVO="sync.revision=${REVISION:-<vazio>} (esperado o commit de pin ${PIN_SHA})"
+    elif [ "$REVISION" != "$PIN_SHA" ]; then ULTIMO_MOTIVO="sync.revision=${REVISION:-<vazio>} lida de .status.${CAMPO_REV} (esperado o commit de pin ${PIN_SHA})"
     elif [ -n "$FALTANDO" ]; then
       # shellcheck disable=SC2086
       ULTIMO_MOTIVO="faltam em .status.summary.images (workloads de pod permanente): ${FALTANDO}(vivas: $(printf '%s ' $IMAGENS))"
@@ -281,7 +349,10 @@ resumo() {
   echo "| --- | --- | --- |"
   echo "| \`sync.status\` | \`Synced\` | \`${SYNC:-<vazio>}\` |"
   echo "| \`health.status\` | \`Healthy\` | \`${HEALTH:-<vazio>}\` |"
-  echo "| \`sync.revision\` | \`${PIN_SHA}\` | \`${REVISION:-<vazio>}\` |"
+  echo "| \`${CAMPO_REV}\` | \`${PIN_SHA}\` | \`${REVISION:-<vazio>}\` |"
+  if [ "$MULTI" = "1" ]; then
+    echo "| source do repo em \`spec.sources[]\` | indice que casa \`${APP_REPO_MATCH}\` | \`[${IDX}] ${SOURCE_REPO:-<vazio>}\` |"
+  fi
   echo "| imagens vivas em \`status.summary.images\` | ${QTD_VIVAS} exigida(s) (pod permanente) | faltando: \`${FALTANDO:-nenhuma}\` |"
   if [ "$QTD_SEM_POD" != "0" ]; then
     # `% ` tira o espaco que a acumulacao deixa no fim — a evidencia e lida por

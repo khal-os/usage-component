@@ -39,6 +39,33 @@ app_json() { # app_json <sync> <health> <revision> <reconciled> <opphase> <image
     '{status:{sync:{status:$s,revision:$r},health:{status:$h},reconciledAt:$rc,summary:{images:$imgs},operationState:$op}}'
 }
 
+# Application MULTI-SOURCE, como o CONTRATO §3 declara: uma source e ESTE repo
+# (`path: deploy/chart`) e a outra e o khal-deploy, entrando so como `ref` de
+# values. Nesse formato o Argo deixa `.status.sync.revision` VAZIO e publica uma
+# revisao por source em `.status.sync.revisions[]`, na ordem de `.spec.sources[]`.
+SRC_REPO='{"repoURL":"https://github.com/khal-os/usage-component.git","path":"deploy/chart","targetRevision":"eks/dev"}'
+SRC_VALUES='{"repoURL":"https://github.com/khal-os/khal-deploy.git","targetRevision":"dev","ref":"values"}'
+
+# app_multi <indice-da-source-do-repo:0|1> <revisao-do-repo> <revisao-do-khal-deploy> <opphase|-> <imagens...>
+app_multi() {
+  local idx="$1" rev_repo="$2" rev_values="$3" op="$4"; shift 4
+  local imgs; imgs="$(printf '%s\n' "$@" | jq -R . | jq -s .)"
+  local sources revisions
+  if [ "$idx" = "0" ]; then
+    sources="[${SRC_REPO},${SRC_VALUES}]"; revisions="[\"${rev_repo}\",\"${rev_values}\"]"
+  else
+    sources="[${SRC_VALUES},${SRC_REPO}]"; revisions="[\"${rev_values}\",\"${rev_repo}\"]"
+  fi
+  local opjson='null'
+  [ "$op" = "-" ] || opjson="{\"phase\":\"${op}\",\"syncResult\":{\"revisions\":${revisions}}}"
+  jq -n --argjson sources "$sources" --argjson revisions "$revisions" \
+        --argjson imgs "$imgs" --argjson op "$opjson" --arg rc "$DEPOIS" \
+    '{spec:{sources:$sources},
+      status:{sync:{status:"Synced",revision:"",revisions:$revisions},
+              health:{status:"Healthy"},reconciledAt:$rc,
+              summary:{images:$imgs},operationState:$op}}'
+}
+
 gate() { # gate <arquivo-json> [extra env...]
   ( cd "$W" \
     && ARGOCD_FETCH_CMD="cat ${1}" \
@@ -54,6 +81,7 @@ titulo "aprova quando TUDO bate"
 app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Succeeded "${TODAS[@]}" > "${TRAB}/ok.json"
 SAIDA="$(gate "${TRAB}/ok.json")"
 contem "aprovado" "APROVADO" "$SAIDA"
+contem "le a revisao do formato single-source" "Application single-source" "$SAIDA"
 contem "conta as tres imagens" "3 imagem(ns) esperada(s)" "$SAIDA"
 contem "exige VIVAS so as de pod permanente" "2 EXIGIDA(S) VIVA(S)" "$SAIDA"
 contem "separa a imagem so de CronJob"       "1 imagem(ns) so em CronJob/Job" "$SAIDA"
@@ -100,6 +128,57 @@ titulo "a evidencia distingue declarada-com-pod de declarada-sem-pod"
 # arvore), a mesma imagem aparece do outro lado da evidencia.
 SAIDA="$(gate "${TRAB}/ok.json")"
 contem "ja com pod cita o backup" "ja com pod: \`${REG}/usage-db-backup@${D_BAK}\`" "$SAIDA"
+
+titulo "MULTI-SOURCE: a revisao vem de revisions[<indice da source do repo>]"
+# O bug que este bloco fecha: com duas sources o Argo deixa `.status.sync.revision`
+# VAZIO. Lendo aquele campo o gate nunca via o pin, queimava os 900 s do deadline
+# e REPROVAVA um deploy correto — a pior forma de falso vermelho, porque parece
+# problema de cluster.
+VIVAS=("${REG}/usage-module@${D_MOD}" "${REG}/usage-connector@${D_CON}")
+app_multi 1 "$PIN_SHA" "$(printf '7%.0s' $(seq 40))" Succeeded "${VIVAS[@]}" > "${TRAB}/m1.json"
+SAIDA="$(gate "${TRAB}/m1.json")"
+contem "aprova com revision vazio e revisions[1] == pin" "APROVADO" "$SAIDA"
+contem "diz que a Application e multi-source"  "Application MULTI-SOURCE (2 sources)" "$SAIDA"
+contem "nomeia o campo lido"                   "sync.revisions[1]"                    "$SAIDA"
+contem "nomeia a source casada"                "usage-component"                      "$SAIDA"
+nao_contem "nao reprova"                       "REPROVADO"                            "$SAIDA"
+
+titulo "MULTI-SOURCE: a ordem das sources nao e assumida"
+# `path: deploy/chart` primeiro, `ref: values` depois — o indice muda, e o gate
+# tem de casar pelo repoURL, nao pela posicao.
+app_multi 0 "$PIN_SHA" "$(printf '7%.0s' $(seq 40))" Succeeded "${VIVAS[@]}" > "${TRAB}/m2.json"
+SAIDA="$(gate "${TRAB}/m2.json")"
+contem "aprova com a source do repo no indice 0" "APROVADO"          "$SAIDA"
+contem "e le revisions[0]"                       "sync.revisions[0]" "$SAIDA"
+
+titulo "MULTI-SOURCE: a revisao da OUTRA source nao serve de aprovacao"
+# Este e o caso que uma leitura "pega a primeira revisao que bater" deixaria
+# passar: o khal-deploy pode estar no commit do pin por coincidencia (mesmo
+# repo de values para varios apps), e o CHART continuar na revisao anterior.
+app_multi 1 "$(printf '8%.0s' $(seq 40))" "$PIN_SHA" Succeeded "${VIVAS[@]}" > "${TRAB}/m3.json"
+SAIDA="$(gate "${TRAB}/m3.json")"
+contem "reprova quando so a source de values casa o pin" "REPROVADO"         "$SAIDA"
+contem "e diz de qual campo leu"                         "sync.revisions[1]" "$SAIDA"
+
+titulo "MULTI-SOURCE: revisions ausente nao vira aprovacao"
+# `revision: ""` + `revisions` ausente = o Argo ainda nao publicou revisao
+# nenhuma. Vazio nunca satisfaz o criterio.
+jq '.status.sync |= (del(.revisions) | .revision = "")' "${TRAB}/m1.json" > "${TRAB}/m4.json"
+SAIDA="$(gate "${TRAB}/m4.json")"
+contem "reprova por revisao vazia" "sync.revision=<vazio>" "$SAIDA"
+nao_contem "nao aprova"            "APROVADO"              "$SAIDA"
+
+titulo "MULTI-SOURCE: nenhuma source casa este repo"
+SAIDA="$( (cd "$W" && ARGOCD_FETCH_CMD="cat ${TRAB}/m1.json" ARGOCD_APP_REPO_MATCH="outro-repo-qualquer" \
+  ARGOCD_VERIFY_DEADLINE_SECONDS=1 ARGOCD_VERIFY_INTERVAL_SECONDS=1 \
+  ./deploy/verify-argo.sh hv-kos-components-dev dev "$PIN_SHA" "$PUSH_EPOCH" 2>&1) )"
+contem "falha dizendo que nao achou a source" "NENHUMA casa" "$SAIDA"
+contem "e lista as sources declaradas"        "khal-deploy"  "$SAIDA"
+
+titulo "MULTI-SOURCE: operacao falhada e lida de syncResult.revisions[]"
+app_multi 1 "$PIN_SHA" "$(printf '7%.0s' $(seq 40))" Failed "${VIVAS[@]}" > "${TRAB}/m5.json"
+SAIDA="$(gate "${TRAB}/m5.json")"
+contem "falha rapida pela operacao do pin" "operationState.phase=Failed" "$SAIDA"
 
 titulo "sem credencial o gate REPROVA (nunca pula)"
 SAIDA="$( (cd "$W" && ARGOCD_VERIFY_DEADLINE_SECONDS=1 ARGOCD_VERIFY_INTERVAL_SECONDS=1 \
