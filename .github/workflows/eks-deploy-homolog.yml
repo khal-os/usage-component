@@ -71,6 +71,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ── HOLD: freeze manual, ANTES de qualquer mutacao externa (CONTRATO §6) ─
+      # deploy/gitops-pin.sh tambem le o HOLD — mas ele so roda no FIM, depois do
+      # build e do push (lane dev) e depois do retag no ECR (lanes de promocao).
+      # Um freeze lido so no fim ja deixou tag nova no registry: o repositorio e
+      # IMMUTABLE, entao aquilo nao se desfaz. A checagem cara e a primeira; a do
+      # gitops-pin fica como cinto, para quem o chama fora da lane.
+      - name: HOLD ativo? (freeze declarado no repo)
+        env:
+          HOLD_ENV: ${{ env.DST_ENV }}
+        run: |
+          set -euo pipefail
+          for HOLD in deploy/HOLD "deploy/HOLD-${HOLD_ENV}"; do
+            if [ -f "$HOLD" ]; then
+              echo "::error::HOLD ativo em ${HOLD} — a lane para AQUI, antes de build, push, retag ou pin."
+              sed -e 's/^/  /' "$HOLD"
+              exit 1
+            fi
+          done
+          echo "  ok: nenhum HOLD ativo para ${HOLD_ENV}"
+
       - uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
         with:
           version: v3.16.3

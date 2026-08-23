@@ -87,6 +87,27 @@ jobs:
             exit 1
           fi
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # ── HOLD: freeze manual, ANTES de qualquer mutacao externa (CONTRATO §6) ─
+      # deploy/gitops-pin.sh tambem le o HOLD — mas ele so roda no FIM, depois do
+      # build e do push (lane dev) e depois do retag no ECR (lanes de promocao).
+      # Um freeze lido so no fim ja deixou tag nova no registry: o repositorio e
+      # IMMUTABLE, entao aquilo nao se desfaz. A checagem cara e a primeira; a do
+      # gitops-pin fica como cinto, para quem o chama fora da lane.
+      - name: HOLD ativo? (freeze declarado no repo)
+        env:
+          HOLD_ENV: ${{ env.CHART_ENV }}
+        run: |
+          set -euo pipefail
+          for HOLD in deploy/HOLD "deploy/HOLD-${HOLD_ENV}"; do
+            if [ -f "$HOLD" ]; then
+              echo "::error::HOLD ativo em ${HOLD} — a lane para AQUI, antes de build, push, retag ou pin."
+              sed -e 's/^/  /' "$HOLD"
+              exit 1
+            fi
+          done
+          echo "  ok: nenhum HOLD ativo para ${HOLD_ENV}"
+
       - name: garantir PyYAML
         run: python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check --quiet 'pyyaml==6.0.2'
       - id: lista

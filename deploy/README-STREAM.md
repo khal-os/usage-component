@@ -5,6 +5,20 @@ Nenhum arquivo pre-existente foi modificado ou removido — o teste
 `deploy/__tests__/lanes.test.sh` prova isso comparando o working tree com
 `origin/main` (CONTRATO §0.1).
 
+**Passe de correcao (revisao de 2026-08-23)** — o que mudou depois da revisao,
+com o "porque" em D10-D13 e os follow-ups em PENDENTE-10/11/12:
+
+| achado | onde | correcao |
+| --- | --- | --- |
+| gate exigia VIVA a imagem que so existe no CronJob de backup → REPROVARIA todo primeiro sync | `deploy/verify-argo.sh` | exige vivas so `Deployment`/`StatefulSet`/`DaemonSet`; `Job`/`CronJob` viram evidencia declarada (D10) |
+| PDB `maxUnavailable: 0` proibia eviction para sempre (contra PLANO §7 risco 3) | `deploy/chart/templates/pdb.yaml` | sempre `maxUnavailable: 1` (D11) |
+| nada reprovava `replicas > 1` com `strategy: Recreate` | `deploy/chart/values.schema.json` | `definitions.singleton` + fixture `bad-recreate-replicas.yaml` (D11) |
+| `eks-ci` em `deploy/**` levava o guard §0.1 para PRs da esteira ECS | `.github/workflows/eks-ci.yml`, `deploy/__tests__/lanes.test.sh` | gatilho estreitado + guard medido so em `eks/**` (D12) |
+| `HOLD` so era lido depois do build/retag | as 3 lanes de deploy | primeiro passo de cada lane, antes do OIDC (D13) |
+| `envFrom` sem guarda: servico sem `secrets:` ficava em `CreateContainerConfigError` | `deployment.yaml`, `job-migrations.yaml`, `cronjob.yaml` | `envFrom` e annotation do Reloader sob `if .secrets` + fixture `svc-sem-secrets.yaml` |
+| dependencia do worker no LangWatch reprovava um deploy correto da api | `deploy/values.yaml`, `deploy/values-dev.yaml` | ordem declarada como pre-requisito BLOQUEANTE (PENDENTE-10) |
+| referencia cruzada errada (`PENDENTE-4` no lugar de `PENDENTE-5`) | `deploy/values.yaml` | corrigida |
+
 ---
 
 ## 1. O que foi entregue
@@ -35,7 +49,7 @@ deploy/
   values.schema.json            symlink -> chart/values.schema.json (ver Decisao D2)
   services.sh                   a lista: images / matrix / repos / workloads (+ guard de coerencia)
   gitops-pin.sh                 escreve o BLOCO de pins e commita (1 arquivo, guards de render)
-  verify-argo.sh                o gate: Synced+Healthy+revision+CONJUNTO de digests, sem skip
+  verify-argo.sh                o gate: Synced+Healthy+revision+CONJUNTO de digests de pod permanente, sem skip (D10)
   bootstrap-eks-repo.sh         branches eks/*, vars, Environment prod-eks, auditoria (dry-run)
   __tests__/                    5 suites, 186 asserces (run-all.sh)
     fixtures/                   pins validos + 6 fixtures INVALIDAS (uma por forma de errar)
@@ -51,7 +65,7 @@ deploy/
 | workload | kind | imagem | replicas | strategy | probes | grace | outros |
 |---|---|---|---|---|---|---|---|
 | `api` | Deployment | `usage-module` | 1 dev/hml, **2 prod** | RollingUpdate (surge 1 / unavail 0) | http `/api/v1/docs/openapi.json` | 30 s | Ingress `api-<env>.hapvida.khal.ai`, preset M, PDB em prod |
-| `trace-ingestion-worker` | Deployment | `usage-connector` | 1 | **Recreate** | exec `stat /tmp/trace-ingestion-heartbeat` | 60 s | PDB `maxUnavailable: 0`, egress 8123 -> `kos-langwatch-<hml\|prod>` |
+| `trace-ingestion-worker` | Deployment | `usage-connector` | 1 | **Recreate** | exec `stat /tmp/trace-ingestion-heartbeat` | 60 s | PDB `maxUnavailable: 1` (D11), egress 8123 -> `kos-langwatch-<hml\|prod>`; unicidade garantida por `Recreate` + `replicas: 1` + schema |
 | `billing-close-scheduler` | Deployment | `usage-module` | 1 | **Recreate** | exec `stat /tmp/billing-close-heartbeat` | 60 s | **`enabled: false`** por padrao (decisao 131 e opt-in) |
 | `migrations` | Job (hook **PreSync**) | `usage-module` | — | — | exit 0 | 30 s | `backoffLimit: 0`, `activeDeadlineSeconds: 600` |
 | `backup` | CronJob | `usage-db-backup` | — | — | exit 0 | — | `0 7 * * *` tz `America/Sao_Paulo`, `restartPolicy: Never`, IRSA `hv-kos-usage-backup-<env>` |
@@ -143,6 +157,54 @@ com ele, dizendo que a branch nunca foi buildada. E por isso que o CI renderiza
 com a fixture `deploy/__tests__/fixtures/pins-valid.yaml`, e por isso que o
 proprio CI prova que sem a fixture o render falha.
 
+**D10 — o gate do Argo exige VIVAS so as imagens de pod permanente.**
+`.status.summary.images` e um retrato dos **pods** da arvore de recursos da
+Application. Um `CronJob` `0 7 * * *` nao tem pod nenhum no instante do sync, e
+a imagem `usage-db-backup` so aparece nele. Exigir aquele digest ali fazia o
+gate queimar os 900 s e REPROVAR o primeiro deploy de cada ambiente — e toda
+promocao que mudasse o digest do backup — sem que nada estivesse errado.
+`deploy/verify-argo.sh` agora classifica cada `image:` pelo `kind` do documento
+renderizado: `Deployment`/`StatefulSet`/`DaemonSet` sao **exigidas vivas** (o
+criterio de conjunto continua inteiro para elas: uma faltando reprova); `Job` e
+`CronJob` entram como **declaradas** e aparecem em separado na evidencia do step
+summary, com a distincao "ja com pod" / "sem pod agora". O `Job` de migracao
+entra do lado declarado de proposito: com `hook-delete-policy` (ou
+`ttlSecondsAfterFinished`) o pod dele desaparece, e depender disso seria o mesmo
+erro do CronJob, so que intermitente. A existencia real desses digests continua
+provada — pelo probe autenticado no ECR que a lane faz ANTES do pin.
+Provado por teste nos dois sentidos: aprova sem o digest do CronJob; reprova
+quando falta o digest de um Deployment.
+
+**D11 — PDB sempre `maxUnavailable: 1`, tambem no singleton.**
+A versao anterior usava `maxUnavailable: 0` quando `replicas: 1`, com a intencao
+de "parar o drain e pedir decisao humana". Com uma replica isso e literalmente
+`minAvailable: 1`: eviction voluntario proibido PARA SEMPRE — `kubectl drain`,
+upgrade de nodegroup e consolidacao do Auto Mode (PLANO §2 D13) ficam pendurados
+sem avisar ninguem. E contrariava o PLANO §7 (risco 3), que diz `maxUnavailable:
+1`. O nao-overlap do singleton nao dependia do PDB: quem garante e `strategy:
+Recreate` + `replicas: 1` — e agora a `values.schema.json`, que **reprova**
+`replicas > 1` com `Recreate` (`definitions.singleton`). Teste de contrato nos
+tres ambientes: nenhum PDB com `maxUnavailable: 0`.
+
+**D12 — o guard do CONTRATO §0.1 mede as branches `eks/**`, e diz quando nao mede.**
+O guard compara a arvore inteira com `origin/main` e exige que tudo seja arquivo
+`A`. Isso so significa alguma coisa quando o que esta sendo medido e ESTA stream.
+Como `deploy/` no `main` e a casa da esteira ECS que serve producao hoje
+(`deploy/taskdefs/*.json`, `deploy/scripts/deploy-tenant.sh`, `deploy/tenants/`),
+um PR de manutencao daquela esteira acusaria "modificado" um arquivo que esta
+stream nunca tocou — check vermelho impossivel de satisfazer. Duas mudancas: (a)
+o gatilho de `pull_request` do `eks-ci` observa a arvore desta esteira, nao
+`deploy/**`; (b) o guard so mede em `eks/**` e, fora dali, IMPRIME que nao mediu
+(nao inventa aprovacao silenciosa). No cutover, quando esta esteira virar A
+esteira, os dois voltam para `deploy/**` — num commit que se ve.
+
+**D13 — `HOLD` e lido no PRIMEIRO passo da lane, nao so no `gitops-pin.sh`.**
+O `HOLD` continua checado dentro do `gitops-pin.sh` (cinto para quem o chama
+fora da lane), mas ele roda no fim: depois do build e do push na lane dev,
+depois do retag no ECR nas de promocao. Com repositorio IMMUTABLE, uma tag
+publicada durante um freeze nao se desfaz. Agora cada lane le o `HOLD` antes de
+assumir a role de OIDC — asserido por ordem de linha no teste das lanes.
+
 ---
 
 ## 3. Como validar (nenhum comando toca nuvem)
@@ -182,18 +244,18 @@ Ferramentas: `helm v3.16.3`, `node v22.22.3`, `actionlint 1.7.12`,
 `gitleaks 8.21.2`, `python3 3.12.3 + PyYAML 6.0.1`, `jq 1.7`.
 
 ```
-$ bash deploy/__tests__/run-all.sh
+$ bash deploy/__tests__/run-all.sh              # apos as correcoes da revisao
 ############ services ############
 -- services: 15 ok, 0 falha(s)
 ############ chart-contract ############
--- chart-contract: 57 ok, 0 falha(s)
+-- chart-contract: 69 ok, 0 falha(s)
 ############ gitops-pin ############
 -- gitops-pin: 27 ok, 0 falha(s)
 ############ verify-argo ############
--- verify-argo: 15 ok, 0 falha(s)
+-- verify-argo: 21 ok, 0 falha(s)
 ############ lanes ############
--- lanes: 72 ok, 0 falha(s)
-TODAS as suites passaram.                       (186 asserces)
+-- lanes: 84 ok, 0 falha(s)
+TODAS as suites passaram.                       (216 asserces)
 
 $ helm lint deploy/chart -f deploy/values.yaml -f deploy/values-dev.yaml -f deploy/__tests__/fixtures/pins-valid.yaml
 ==> Linting deploy/chart
@@ -226,11 +288,16 @@ $ git diff --name-status origin/main -- . | awk '$1 != "A"'
 (vazio — nada pre-existente foi modificado ou removido)
 ```
 
-O que as 6 fixtures invalidas provam que a `values.schema.json` REPROVA:
+O que as **7** fixtures invalidas provam que a `values.schema.json` REPROVA:
 segredo literal em `envOverride` (`MONGO_DB_PASSWORD`), servico sem
 `health.readiness`, `preset` junto de `resources`, "digest" que e uma tag,
-repositorio fora de `<conta>.dkr.ecr.<regiao>.amazonaws.com/kos/<nome>`, e
-`certificate-arn` nas annotations do Ingress do app.
+repositorio fora de `<conta>.dkr.ecr.<regiao>.amazonaws.com/kos/<nome>`,
+`certificate-arn` nas annotations do Ingress do app, e — nova — **`replicas > 1`
+num servico `strategy: Recreate`** (`bad-recreate-replicas.yaml`), que era o
+risco 3 do PLANO §7 passando calado.
+Ha ainda uma fixture VALIDA, `svc-sem-secrets.yaml`: um servico sem `secrets:`,
+usada para provar que o chart nao falha ABERTO nesse caso (sem ExternalSecret
+nao pode haver `envFrom` de um Secret que ninguem cria).
 
 **Nao rodado, e por que**: `npm run typecheck` / `npm test` — nenhum arquivo de
 `packages/**` foi tocado (a esteira nao muda codigo de aplicacao). `tofu` — nao
@@ -316,6 +383,44 @@ Nem em dry-run: qualquer execucao faz chamadas ao GitHub, e esta fase e de
 mutacao externa ZERO. So passou por `bash -n`. A primeira execucao deve ser
 `deploy/bootstrap-eks-repo.sh khal-os/usage-component` (sem `--apply`).
 
+**PENDENTE-10 — ORDEM DE SUBIDA: LangWatch ANTES de `kos-components-<env>`.**
+**Bloqueante para a stream E.** O `trace-ingestion-worker` depende do ClickHouse
+do LangWatch (`kos-langwatch-hml` para dev **e** hml, `kos-langwatch` para prod,
+CONTRATO §3). A dependencia NAO e do probe: sem fonte configurada o processo sai
+1 de proposito (`packages/connector/src/main/jobs/run-trace-ingestion-loop.ts`,
+audit G-1 — "crash loop VISIVEL em vez de ocioso verde"), e com fonte porem sem
+ClickHouse alcancavel `assertCompatibleSchema()` e fatal no boot. Nos dois casos
+o Deployment nunca fica `Available`, a Application nunca fica `Healthy` e o gate
+(sem ramo de skip, 900 s) REPROVA um deploy da api que estava correto.
+Por isso `hv-kos-langwatch-hml` tem de estar `Healthy` **antes** do primeiro sync
+de `hv-kos-components-dev` (e o mesmo vale para hml e prod).
+*Por que nao "desligar o worker em dev e pronto"*: nao ha meia-volta barata. As
+lanes de promocao montam o bloco de digests a partir das imagens RENDERIZADAS na
+origem, e o `gitops-pin.sh` recusa bloco parcial (o conjunto de `images:` e o
+contrato); desligar so este workload num ambiente faria `usage-connector` sumir
+do bloco e a promocao falhar. Desligar na FORMA (`deploy/values.yaml`) exigiria
+tirar `usage-connector` de `images:` — o que apaga o build da imagem e o guard de
+coerencia do `services.sh`. A ordem e o caminho.
+
+**PENDENTE-11 — `gitSha` da promocao != commit que construiu a imagem.**
+Nas lanes de hml/prod, `gitops-pin.sh` grava `$GITHUB_SHA` (o commit da branch de
+DESTINO) em `pins.<img>.gitSha`, enquanto a tag aplicada no ECR na mesma execucao
+usa o commit de ORIGEM (`hml-<SRC_SHA>`). Os dois identificadores do mesmo digest
+discordam, e uma forense precisa traduzir na mao. A correcao NAO e trocar um pelo
+outro: o guard de frescor da lane seguinte compara `gitSha` contra a ponta da
+branch de origem: trocar por `SRC_SHA` o quebraria. O caminho e um campo
+`sourceGitSha` ao lado do `gitSha` (schema + escrita no `gitops-pin.sh` + um
+campo a mais na evidencia), fora do escopo desta correcao porque muda a FORMA do
+bloco de pins, que o CONTRATO §5 descreve.
+
+**PENDENTE-12 — `extraEgress` libera 1024-65535 para o /16 inteiro da VPC.**
+A intencao e alcançar as ENIs do PrivateLink do Atlas (o driver do Mongo abre
+27017 e portas altas dos membros do replica set), mas o CNI da AWS da aos pods
+IPs dessas mesmas faixas: a policy declarada cobre o cluster inteiro. Hoje e
+inocuo (enforcement de NetworkPolicy desligado nos dois clusters), e por isso nao
+foi estreitado no escuro — o alvo certo sao os `/32` do VPC endpoint, que a
+stream A cria. Quando o PrivateLink existir, e uma linha por `values-<env>.yaml`.
+
 ---
 
 ## 5. Ordem de armar (quando a fase de publicacao abrir)
@@ -330,9 +435,13 @@ mutacao externa ZERO. So passou por `bash -n`. A primeira execucao deve ser
    `LANGWATCH_PROJECT_ID`). Policy do ESO e `conditions.namespaces` do
    ClusterSecretStore recebem `kos-components-dev` — **aditivo, lendo o vivo**.
 4. Reloader `--namespaces` += `kos-components-dev` (aditivo, lendo o vivo).
-5. Stream E aplica AppProject `kos-hapvida` e a Application
+5. **LangWatch primeiro** (PENDENTE-10): `hv-kos-langwatch-hml` `Healthy` ANTES
+   do primeiro sync de `hv-kos-components-dev` — dev e hml usam o ClickHouse de
+   `kos-langwatch-hml`. Sem ele o `trace-ingestion-worker` sai 1 no boot, a
+   Application nunca fica `Healthy` e o gate reprova um deploy correto da api.
+6. Stream E aplica AppProject `kos-hapvida` e a Application
    `hv-kos-components-dev`; conta `ci-kos-verify` no Argo -> `ARGOCD_CI_TOKEN`.
-6. `gh variable set KOS_EKS_PUBLISH_ENABLED true` -> primeiro run por
+7. `gh variable set KOS_EKS_PUBLISH_ENABLED true` -> primeiro run por
    `workflow_dispatch` na `eks/dev` (o placeholder faz a Application ficar
    OutOfSync ate o primeiro pin, o que e o comportamento desejado).
-7. So depois: `eks/homolog`, e por ultimo `KOS_EKS_PROD_ENABLED` + `eks/main`.
+8. So depois: `eks/homolog`, e por ultimo `KOS_EKS_PROD_ENABLED` + `eks/main`.

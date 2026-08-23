@@ -14,9 +14,19 @@
 #   2. .status.health.status == Healthy   (Synced != Healthy: Synced diz que o
 #      cluster recebeu o manifesto, nao que o pod subiu)
 #   3. .status.sync.revision == o SHA do commit de pin
-#   4. TODOS os repo@digest esperados aparecem em .status.summary.images
-#      (estado VIVO). Conjunto, nao amostra: este repo tem 3 imagens e 5
-#      workloads; conferir uma so deixaria o worker no digest velho passar.
+#   4. TODOS os repo@digest de workload de POD PERMANENTE (Deployment,
+#      StatefulSet, DaemonSet) aparecem em .status.summary.images (estado VIVO).
+#      Conjunto, nao amostra: este repo tem 3 imagens e 5 workloads; conferir
+#      uma so deixaria o worker no digest velho passar.
+#      NAO entra no criterio a imagem que so nasce em CronJob/Job: o campo
+#      `.status.summary.images` e um retrato dos PODS da arvore de recursos, e um
+#      CronJob '0 7 * * *' nao tem pod nenhum no instante do sync. Exigi-la ali
+#      REPROVARIA, depois de queimar o deadline inteiro, um deploy que deu certo
+#      — que e o modo de falha classico de gate por amostra de pods. Essas
+#      imagens sao conferidas como DECLARADAS (o render prova que o CronJob
+#      carrega o digest pinado) e reportadas em separado na evidencia; a
+#      existencia real delas no registry ja e provada pela lane, no probe
+#      autenticado do ECR que precede o pin.
 #   5. .status.reconciledAt ESTRITAMENTE posterior ao instante do push
 #   6. .status.operationState, quando nao-null, em Succeeded
 #
@@ -98,8 +108,34 @@ if ! helm template kos-components "${TMP}/deploy/chart" --namespace "$NS_RENDER"
   exit 1
 fi
 
-IMAGENS_ESPERADAS="$(awk '$1 == "image:" { gsub(/"/, "", $2); print $2 }' "${TMP}/render.yaml" | sort -u)"
+# Classifica cada `image:` pelo KIND do documento em que ela aparece — `kind:` na
+# coluna 0 e sempre o do recurso (os `kind:` aninhados, como o do secretStoreRef,
+# vem indentados). A classificacao e o que separa "tem de estar VIVA agora" de
+# "esta DECLARADA no manifesto"; ver a nota (4) do cabecalho.
+CLASSIFICADAS="$(awk '
+  /^---$/        { kind = "" }
+  /^kind: /      { kind = $2 }
+  $1 == "image:" { gsub(/"/, "", $2); print kind "\t" $2 }
+' "${TMP}/render.yaml" | sort -u)"
+
+IMAGENS_ESPERADAS="$(cut -f2 <<<"$CLASSIFICADAS" | sort -u)"
 [ -n "$IMAGENS_ESPERADAS" ] || morre "o commit ${PIN_SHA} nao renderiza nenhuma imagem"
+
+# Pod permanente = o kind cujo sync JA cria pod. Job entra como "sem pod" de
+# proposito: com hook-delete-policy o Job da rodada anterior some, e um Job com
+# ttlSecondsAfterFinished leva o pod junto — depender dele seria o mesmo erro do
+# CronJob, so que intermitente.
+IMAGENS_VIVAS_ESPERADAS="$(awk -F'\t' '
+  $1 == "Deployment" || $1 == "StatefulSet" || $1 == "DaemonSet" { print $2 }
+' <<<"$CLASSIFICADAS" | sort -u)"
+IMAGENS_SEM_POD="$(awk -F'\t' '
+  { todas[$2] = 1 }
+  $1 == "Deployment" || $1 == "StatefulSet" || $1 == "DaemonSet" { vivas[$2] = 1 }
+  END { for (i in todas) if (!(i in vivas)) print i }
+' <<<"$CLASSIFICADAS" | sort -u)"
+
+[ -n "$IMAGENS_VIVAS_ESPERADAS" ] \
+  || morre "o commit ${PIN_SHA} nao renderiza nenhum workload de pod permanente (Deployment/StatefulSet/DaemonSet). Sem isso nao ha o que medir VIVO — o gate se recusa a aprovar por ausencia de criterio."
 while read -r img; do
   [[ "$img" =~ ^([^@[:space:]]+)@(sha256:[0-9a-f]{64})$ ]] \
     || morre "o commit ${PIN_SHA} renderiza '${img}', que nao esta pinado por digest"
@@ -109,10 +145,20 @@ while read -r img; do
 done <<<"$IMAGENS_ESPERADAS"
 
 QTD_ESPERADAS="$(printf '%s\n' "$IMAGENS_ESPERADAS" | wc -l | tr -d ' ')"
+QTD_VIVAS="$(printf '%s\n' "$IMAGENS_VIVAS_ESPERADAS" | wc -l | tr -d ' ')"
+QTD_SEM_POD=0
+[ -z "$IMAGENS_SEM_POD" ] || QTD_SEM_POD="$(printf '%s\n' "$IMAGENS_SEM_POD" | wc -l | tr -d ' ')"
 
 echo "verify-argo: application=${APP} ambiente=${AMBIENTE} pin=${PIN_SHA}"
-echo "verify-argo: ${QTD_ESPERADAS} imagem(ns) esperada(s), lidas de deploy/values-${AMBIENTE}.yaml no commit ${PIN_SHA}:"
-printf '  · %s\n' $IMAGENS_ESPERADAS
+echo "verify-argo: ${QTD_ESPERADAS} imagem(ns) esperada(s), lidas de deploy/values-${AMBIENTE}.yaml no commit ${PIN_SHA}."
+echo "verify-argo: ${QTD_VIVAS} EXIGIDA(S) VIVA(S) em .status.summary.images (pod permanente):"
+# shellcheck disable=SC2086  # word splitting DELIBERADO: uma linha por imagem
+printf '  · %s\n' $IMAGENS_VIVAS_ESPERADAS
+if [ "$QTD_SEM_POD" != "0" ]; then
+  echo "verify-argo: ${QTD_SEM_POD} imagem(ns) so em CronJob/Job — DECLARADA(S) no manifesto, nao exigida(s) vivas (um CronJob nao cria pod no sync):"
+  # shellcheck disable=SC2086
+  printf '  · %s\n' $IMAGENS_SEM_POD
+fi
 echo "verify-argo: deadline=${DEADLINE_SECONDS}s intervalo=${INTERVAL_SECONDS}s"
 
 # ── busca da Application ────────────────────────────────────────────────────
@@ -143,6 +189,7 @@ epoch_de() { # RFC3339 -> epoch; vazio/invalido/null -> 0 (nunca satisfaz o crit
 INICIO="$(date -u +%s)"; LIMITE=$(( INICIO + DEADLINE_SECONDS ))
 ULTIMO_MOTIVO="nenhuma resposta lida ainda"; RODADA=0
 SYNC=""; HEALTH=""; REVISION=""; RECONCILED=""; OP_PHASE=""; OP_REV=""; IMAGENS=""; FALTANDO=""
+SEM_POD_VIVAS=""; SEM_POD_AUSENTES=""
 
 while :; do
   RODADA=$(( RODADA + 1 ))
@@ -172,8 +219,22 @@ while :; do
 
     FALTANDO=""
     while read -r esperada; do
+      [ -z "$esperada" ] && continue
       grep -Fxq "$esperada" <<<"$IMAGENS" || FALTANDO="${FALTANDO}${esperada} "
-    done <<<"$IMAGENS_ESPERADAS"
+    done <<<"$IMAGENS_VIVAS_ESPERADAS"
+
+    # As imagens sem pod no sync entram como EVIDENCIA, nunca como criterio.
+    SEM_POD_VIVAS=""; SEM_POD_AUSENTES=""
+    if [ -n "$IMAGENS_SEM_POD" ]; then
+      while read -r declarada; do
+        [ -z "$declarada" ] && continue
+        if grep -Fxq "$declarada" <<<"$IMAGENS"; then
+          SEM_POD_VIVAS="${SEM_POD_VIVAS}${declarada} "
+        else
+          SEM_POD_AUSENTES="${SEM_POD_AUSENTES}${declarada} "
+        fi
+      done <<<"$IMAGENS_SEM_POD"
+    fi
 
     # Falha rapida: a operacao DESTE pin terminou em erro. Continuar esperando so
     # queima o deadline para chegar ao mesmo vermelho 15 minutos depois.
@@ -188,7 +249,8 @@ while :; do
     elif [ "$HEALTH" != "Healthy" ];    then ULTIMO_MOTIVO="health.status=${HEALTH:-<vazio>} (esperado Healthy)"
     elif [ "$REVISION" != "$PIN_SHA" ]; then ULTIMO_MOTIVO="sync.revision=${REVISION:-<vazio>} (esperado o commit de pin ${PIN_SHA})"
     elif [ -n "$FALTANDO" ]; then
-      ULTIMO_MOTIVO="faltam em .status.summary.images: ${FALTANDO}(vivas: $(printf '%s ' $IMAGENS))"
+      # shellcheck disable=SC2086
+      ULTIMO_MOTIVO="faltam em .status.summary.images (workloads de pod permanente): ${FALTANDO}(vivas: $(printf '%s ' $IMAGENS))"
     elif [ "$RECONCILED_EPOCH" -le "$PUSHED_AT" ]; then
       # ESTRITAMENTE posterior, nao ">=": reconciledAt tem granularidade de
       # segundo e o epoch do push e tomado ANTES do pin (render + commit +
@@ -220,12 +282,22 @@ resumo() {
   echo "| \`sync.status\` | \`Synced\` | \`${SYNC:-<vazio>}\` |"
   echo "| \`health.status\` | \`Healthy\` | \`${HEALTH:-<vazio>}\` |"
   echo "| \`sync.revision\` | \`${PIN_SHA}\` | \`${REVISION:-<vazio>}\` |"
-  echo "| imagens em \`status.summary.images\` | ${QTD_ESPERADAS} esperada(s) | faltando: \`${FALTANDO:-nenhuma}\` |"
+  echo "| imagens vivas em \`status.summary.images\` | ${QTD_VIVAS} exigida(s) (pod permanente) | faltando: \`${FALTANDO:-nenhuma}\` |"
+  if [ "$QTD_SEM_POD" != "0" ]; then
+    # `% ` tira o espaco que a acumulacao deixa no fim — a evidencia e lida por
+    # gente e casada por teste; um espaco invisivel quebra os dois.
+    local com_pod="${SEM_POD_VIVAS% }" sem_pod="${SEM_POD_AUSENTES% }"
+    echo "| imagens so de CronJob/Job | ${QTD_SEM_POD} declarada(s), **nao exigida(s) vivas** | ja com pod: \`${com_pod:-nenhuma}\` · sem pod agora: \`${sem_pod:-nenhuma}\` |"
+  fi
   echo "| \`reconciledAt\` | \`> ${PUSHED_AT}\` (epoch do push) | \`${RECONCILED:-<vazio>}\` |"
   echo "| \`operationState.phase\` | \`Succeeded\` ou ausente | \`${OP_PHASE:-<null>}\` |"
   echo
   echo "Conjunto esperado lido de \`deploy/values-${AMBIENTE}.yaml\` **no commit \`${PIN_SHA}\`** (nunca de variavel do workflow):"
   printf '%s\n' "$IMAGENS_ESPERADAS" | sed -e 's/^/- `/' -e 's/$/`/'
+  if [ "$QTD_SEM_POD" != "0" ]; then
+    echo
+    echo "As imagens de CronJob/Job acima estao **declaradas** no manifesto do commit pinado, e nao no criterio de vivacidade: \`.status.summary.images\` retrata os PODS da arvore de recursos, e um CronJob so materializa pod no horario do schedule. A existencia real do digest delas foi provada pela lane, no probe autenticado do ECR que precede o pin."
+  fi
   if [ "${APROVADO:-0}" = "1" ]; then
     echo; echo "**APROVADO** em ${RODADA} rodada(s)."
   else
@@ -237,7 +309,7 @@ resumo
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then resumo >> "$GITHUB_STEP_SUMMARY"; fi
 
 if [ "${APROVADO:-0}" = "1" ]; then
-  echo "verify-argo: APROVADO — as ${QTD_ESPERADAS} imagens pinadas estao VIVAS em ${APP}, na revisao ${PIN_SHA}."
+  echo "verify-argo: APROVADO — as ${QTD_VIVAS} imagem(ns) de pod permanente estao VIVAS em ${APP}, na revisao ${PIN_SHA} (${QTD_SEM_POD} so de CronJob/Job: declarada(s), nao exigida(s) vivas)."
   exit 0
 fi
 morre "REPROVADO — ${ULTIMO_MOTIVO}"

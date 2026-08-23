@@ -163,9 +163,32 @@ services:
 
   # ───────────────────────────────────────────────────────────────────────────
   # trace-ingestion-worker — o laco de ingestao (@observability/connector).
+  #
+  # ⚠ ORDEM DE SUBIDA — PRE-REQUISITO BLOQUEANTE, nao preferencia: o LangWatch do
+  # ambiente (ClickHouse em `kos-langwatch-hml` para dev e hml,
+  # `kos-langwatch` para prod) tem de estar de pe ANTES do primeiro sync de
+  # `kos-components-<env>`. Isto NAO e sobre o probe: sem fonte configurada o
+  # processo sai 1 de proposito (run-trace-ingestion-loop.ts, audit G-1:
+  # "crash loop VISIVEL em vez de ocioso verde") e, com fonte porem sem
+  # ClickHouse alcancavel, `assertCompatibleSchema()` e fatal no boot. Em
+  # qualquer dos dois o Deployment nunca fica Available, a Application nunca fica
+  # Healthy e o gate (sem ramo de skip, 900s) REPROVA um deploy da api que estava
+  # correto.
+  #
+  # E se o LangWatch nao puder vir antes? Nao ha meia-volta barata: desligar so
+  # este workload num ambiente quebra a escada de promocao, porque as lanes de
+  # hml/prod montam o bloco de digests a partir das imagens RENDERIZADAS na
+  # origem e o gitops-pin exige o conjunto inteiro de `images:` (subconjunto e
+  # recusado, de proposito). Tirar `usage-connector` de `images:` para acompanhar
+  # exigiria tirar tambem este bloco. Ou seja: a ordem e o caminho — subir o
+  # LangWatch primeiro. Registrado como pre-requisito da stream E no
+  # deploy/README-STREAM.md.
   # SINGLETON SEM LEASE: duas replicas ingerem o mesmo batch e duplicam traces
-  # (e a fatura). `Recreate` + `replicas: 1` + PDB `maxUnavailable: 0` sao as
-  # tres travas; nenhuma delas sozinha basta.
+  # (e a fatura). As travas sao `strategy: Recreate` + `replicas: 1` + a schema,
+  # que REPROVA `replicas > 1` junto de `Recreate` (values.schema.json,
+  # definitions.singleton) — sem ela, um `replicas: 3` no values do ambiente
+  # passaria calado. O PDB (maxUnavailable: 1, PLANO §7 risco 3) atrasa o despejo
+  # num drain; ele NAO e trava de unicidade e nao deve virar uma.
   # ───────────────────────────────────────────────────────────────────────────
   trace-ingestion-worker:
     enabled: true
@@ -194,7 +217,7 @@ services:
       # Aqui usamos `stat` (existencia), nao frescor: o compose compara a idade
       # do arquivo contra 2x intervalo + 120s, mas um probe exec com aritmetica
       # de data em `sh -c` e fragil de ler e de manter. O frescor real fica como
-      # follow-up (PENDENTE-4) — quando o app expuser /readyz honesto, ele vira
+      # follow-up (PENDENTE-5) — quando o app expuser /readyz honesto, ele vira
       # o criterio dos dois lados.
       liveness:
         command: ["stat", "/tmp/trace-ingestion-heartbeat"]

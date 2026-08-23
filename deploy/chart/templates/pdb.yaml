@@ -1,9 +1,18 @@
 {{- /*
 PDB quando ha mais de uma replica (protege a disponibilidade num drain) OU quando
-a estrategia e Recreate (singleton: `maxUnavailable: 0` faz o drain PARAR e pedir
-decisao humana em vez de derrubar o unico worker de ingestao no meio de um
-batch). Com 1 replica NUNCA usar minAvailable: 1 — isso trava o drain para sempre
-sem dizer por que.
+a estrategia e Recreate (singleton declarado).
+
+SEMPRE `maxUnavailable: 1`, inclusive no singleton — e o que o PLANO §7 (risco 3)
+manda. Com `replicas: 1`, `maxUnavailable: 0` e EXATAMENTE `minAvailable: 1`: o
+eviction voluntario passa a ser proibido para sempre, e quem paga nao e o worker
+— e o `kubectl drain` de um no, o upgrade de nodegroup e a consolidacao do EKS
+Auto Mode (PLANO §2 D13), que ficam pendurados sem dizer por que. "Parar o drain
+e pedir decisao humana" nao existe como estado: ninguem e notificado, o drain so
+nao termina.
+
+O nao-overlap do singleton ja e garantido por `strategy: Recreate` + `replicas: 1`
+(a schema reprova >1 com Recreate) — o PDB aqui atrasa o despejo ate o pod novo
+existir, nao o impede.
 */ -}}
 {{- range $name, $svc := .Values.services }}
 {{- if $svc.enabled }}
@@ -19,11 +28,7 @@ metadata:
   labels:
     {{- include "kos.labels" $ctx | nindent 4 }}
 spec:
-  {{- if gt (int $svc.replicas) 1 }}
   maxUnavailable: 1
-  {{- else }}
-  maxUnavailable: 0
-  {{- end }}
   selector:
     matchLabels:
       {{- include "kos.selectorLabels" $ctx | nindent 6 }}

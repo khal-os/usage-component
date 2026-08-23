@@ -55,6 +55,8 @@ app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Succeeded "${TODAS[@]}" > "${TRAB}/
 SAIDA="$(gate "${TRAB}/ok.json")"
 contem "aprovado" "APROVADO" "$SAIDA"
 contem "conta as tres imagens" "3 imagem(ns) esperada(s)" "$SAIDA"
+contem "exige VIVAS so as de pod permanente" "2 EXIGIDA(S) VIVA(S)" "$SAIDA"
+contem "separa a imagem so de CronJob"       "1 imagem(ns) so em CronJob/Job" "$SAIDA"
 
 titulo "reprova cada criterio, um de cada vez"
 app_json OutOfSync Healthy "$PIN_SHA" "$DEPOIS" Succeeded "${TODAS[@]}" > "${TRAB}/1.json"
@@ -78,6 +80,26 @@ app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Succeeded \
 SAIDA="$(gate "${TRAB}/7.json")"
 contem "reprova por imagem faltante" "faltam em .status.summary.images" "$SAIDA"
 contem "diz QUAL faltou"             "usage-connector@${D_CON}"          "$SAIDA"
+
+titulo "a imagem que so existe em CronJob NAO e criterio de vivacidade"
+# `.status.summary.images` e um retrato dos PODS da arvore de recursos. O CronJob
+# de backup roda 07:00: no instante do sync ele nao tem pod nenhum, e o digest
+# dele nao aparece ali. Exigi-lo transformava TODO primeiro deploy (e toda
+# promocao que mude o digest do backup) em 900s de espera seguidos de reprovacao
+# de um deploy que deu certo. Aqui o gate tem de APROVAR — e dizer, na evidencia,
+# que aquela imagem esta DECLARADA e nao foi medida viva.
+app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Succeeded \
+  "${REG}/usage-module@${D_MOD}" "${REG}/usage-connector@${D_CON}" > "${TRAB}/8.json"
+SAIDA="$(gate "${TRAB}/8.json")"
+contem "aprova sem o digest do CronJob" "APROVADO" "$SAIDA"
+contem "registra o digest do CronJob como sem pod agora" "sem pod agora: \`${REG}/usage-db-backup@${D_BAK}\`" "$SAIDA"
+nao_contem "nao reprova por causa do CronJob" "REPROVADO" "$SAIDA"
+
+titulo "a evidencia distingue declarada-com-pod de declarada-sem-pod"
+# Quando o pod do backup existe (a janela em que o Job da noite ainda esta na
+# arvore), a mesma imagem aparece do outro lado da evidencia.
+SAIDA="$(gate "${TRAB}/ok.json")"
+contem "ja com pod cita o backup" "ja com pod: \`${REG}/usage-db-backup@${D_BAK}\`" "$SAIDA"
 
 titulo "sem credencial o gate REPROVA (nunca pula)"
 SAIDA="$( (cd "$W" && ARGOCD_VERIFY_DEADLINE_SECONDS=1 ARGOCD_VERIFY_INTERVAL_SECONDS=1 \

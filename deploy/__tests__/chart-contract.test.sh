@@ -71,7 +71,7 @@ for env in dev hml prod; do
 done
 
 titulo "schema reprova as formas conhecidas de errar"
-for f in bad-secret-literal bad-no-health bad-preset-and-resources bad-digest bad-repository bad-cert-arn; do
+for f in bad-secret-literal bad-no-health bad-preset-and-resources bad-digest bad-repository bad-cert-arn bad-recreate-replicas; do
   if render dev -f "$PINS" -f "${FIX}/${f}.yaml" >/dev/null 2>&1; then
     falha "${f}.yaml PASSOU (deveria ser reprovado pela values.schema.json)"
   else
@@ -79,13 +79,36 @@ for f in bad-secret-literal bad-no-health bad-preset-and-resources bad-digest ba
   fi
 done
 
-titulo "singletons: Recreate + 1 replica + PDB maxUnavailable 0"
+titulo "singletons: Recreate + 1 replica, e a schema e quem garante o 1"
 DEV="${RENDER[dev]}"
 BLOCO_WORKER="$(awk '/^kind: Deployment$/{d=1} d&&/name: trace-ingestion-worker$/{p=1} p; p&&/^---$/{exit}' <<<"$DEV")"
 contem "worker: strategy Recreate" "type: Recreate" "$BLOCO_WORKER"
 contem "worker: 1 replica"         "replicas: 1"    "$BLOCO_WORKER"
-BLOCO_PDB="$(awk '/^kind: PodDisruptionBudget$/{p=1} p; p&&/^---$/{exit}' <<<"$DEV")"
-contem "worker: PDB com maxUnavailable 0" "maxUnavailable: 0" "$BLOCO_PDB"
+
+titulo "PDB nunca proibe eviction para sempre (PLANO §7 risco 3)"
+# `maxUnavailable: 0` com 1 replica e `minAvailable: 1` com outro nome: o drain
+# de no, o upgrade de nodegroup e a consolidacao do Auto Mode ficam pendurados
+# sem que ninguem seja avisado. (O filtro por documento e necessario: o mesmo
+# `maxUnavailable: 0` do rollingUpdate dos Deployments e legitimo e desejado.)
+docs_de_kind() { # docs_de_kind <kind> <render>
+  awk -v alvo="$1" '/^---$/ { if (guarda) printf "%s", buf; kind = ""; buf = ""; guarda = 0; next }
+                    /^kind: / { kind = $2; if (kind == alvo) guarda = 1 }
+                    { buf = buf $0 "\n" }
+                    END { if (guarda) printf "%s", buf }' <<<"$2"
+}
+for env in dev hml prod; do
+  nao_contem "${env}: nenhum PDB com maxUnavailable 0" "maxUnavailable: 0" "$(docs_de_kind PodDisruptionBudget "${RENDER[$env]}")"
+  contem "${env}: todo PDB com maxUnavailable 1" "maxUnavailable: 1" "$(docs_de_kind PodDisruptionBudget "${RENDER[$env]}")"
+done
+BLOCO_PDB="$(docs_de_kind PodDisruptionBudget "$DEV")"
+contem "worker: PDB do singleton existe" "name: trace-ingestion-worker" "$BLOCO_PDB"
+
+titulo "replicas > 1 com Recreate e REPROVADO (nao renderizado em silencio)"
+# O contrato do singleton nao vale se a unica coisa que o sustenta for um
+# comentario. Este caso e o do PLANO §7 risco 3 ("duplica traces e a fatura").
+SAIDA="$(render dev -f "$PINS" -f "${FIX}/bad-recreate-replicas.yaml" 2>&1 || true)"
+contem "a schema cita o servico" "services.trace-ingestion-worker" "$SAIDA"
+contem "a schema cita replicas"  "replicas"                        "$SAIDA"
 
 titulo "prod: api com 2 replicas e PDB proprio"
 PROD="${RENDER[prod]}"
@@ -98,6 +121,17 @@ for chave in "creationPolicy: Owner" "deletionPolicy: Retain" "conversionStrateg
   contem "ExternalSecret: ${chave}" "$chave" "$ES"
 done
 verifica "um ExternalSecret por workload habilitado (4)" "4" "$(grep -c '^kind: ExternalSecret$' <<<"$DEV")"
+
+titulo "servico SEM secrets nao falha ABERTO"
+# Sem `secrets:` nao ha ExternalSecret; um `envFrom` (ou uma annotation de
+# Reloader) para o `<svc>-env` inexistente prenderia o pod em
+# CreateContainerConfigError para sempre. Nenhum dos 5 workloads deste repo cai
+# no caso — o chart, porem, e o generico do Padrao (CONTRATO §5).
+SEM_SECRETS="$(render dev -f "$PINS" -f "${FIX}/svc-sem-secrets.yaml")"
+nao_contem "nenhuma referencia a probe-sem-secrets-env" "probe-sem-secrets-env" "$SEM_SECRETS"
+contem "mas o Deployment do servico existe" "name: probe-sem-secrets" "$SEM_SECRETS"
+verifica "e continua havendo 4 ExternalSecrets (um por workload COM secrets)" "4" \
+  "$(grep -c '^kind: ExternalSecret$' <<<"$SEM_SECRETS")"
 
 titulo "Reloader escopado em todo Deployment"
 verifica "annotation de reload em todos os Deployments" \

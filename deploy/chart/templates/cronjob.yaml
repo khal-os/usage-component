@@ -53,9 +53,11 @@ spec:
                 {{- include "kos.env" (dict "svc" $cj) | trim | nindent 16 }}
                 - name: GIT_SHA
                   value: {{ include "kos.gitSha" (dict "root" $ "name" $name "image" $cj.image) | quote }}
+              {{- if $cj.secrets }}
               envFrom:
                 - secretRef:
                     name: {{ include "kos.envSecretName" $ctx }}
+              {{- end }}
               resources:
                 {{- include "kos.resources" $ctx | trim | nindent 16 }}
               securityContext:

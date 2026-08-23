@@ -14,9 +14,14 @@ metadata:
     {{- include "kos.labels" $ctx | nindent 4 }}
   {{- /* Reloader ESCOPADO ao Secret deste servico, nunca a forma `auto`: `auto`
      observaria tambem ConfigMaps e daria dois rollouts por mudanca. E o
-     controller le a annotation do WORKLOAD, nao do pod template. */}}
+     controller le a annotation do WORKLOAD, nao do pod template.
+     A annotation acompanha o `envFrom`: sem `secrets:` nao existe Secret
+     `<svc>-env` (o ExternalSecret nao e renderizado), e apontar o Reloader para
+     um objeto que ninguem cria e pedir um rollout que nunca vem. */}}
   annotations:
+    {{- if $svc.secrets }}
     secret.reloader.stakater.com/reload: {{ $secretName | quote }}
+    {{- end }}
     khal.ai/git-sha: {{ include "kos.gitSha" (dict "root" $ "name" $name "image" $svc.image) | quote }}
     {{- with $svc.deploymentAnnotations }}
     {{- toYaml . | nindent 4 }}
@@ -81,10 +86,16 @@ spec:
               value: {{ include "kos.gitSha" (dict "root" $ "name" $name "image" $svc.image) | quote }}
           {{- /* Secret materializado pelo ESO a partir dos paths declarados em
              `secrets:`. O chart nunca renderiza o objeto de segredo em si
-             (CONTRATO §0.2) — so o ExternalSecret que o pede. */}}
+             (CONTRATO §0.2) — so o ExternalSecret que o pede.
+             SOB GUARDA: sem `secrets:` o ExternalSecret nao e renderizado, e um
+             `envFrom` apontando para um Secret que ninguem cria prende o pod em
+             CreateContainerConfigError para sempre — falha ABERTA num chart que
+             o CONTRATO §5 posiciona como o chart generico do Padrao. */}}
+          {{- if $svc.secrets }}
           envFrom:
             - secretRef:
                 name: {{ $secretName }}
+          {{- end }}
           {{- with $health.liveness }}
           livenessProbe:
             {{- include "kos.probe" (dict "probe" . "port" $svc.port "name" $name) | trim | nindent 12 }}

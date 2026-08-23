@@ -70,7 +70,11 @@ services:
     envOverride:
       ENVIRONMENT: homolog
       MONGO_USAGE_DB_NAME: hapvida_dev
-      # dev NAO tem LangWatch proprio: usa o de hml (CONTRATO §3).
+      # dev NAO tem LangWatch proprio: usa o de hml (CONTRATO §3). Consequencia
+      # de ordem: `kos-langwatch-hml` (stream D/E) precisa estar de pe ANTES do
+      # primeiro sync de kos-components-dev — sem ClickHouse o worker sai 1 no
+      # boot e o gate reprova o deploy inteiro. Ver a nota do workload em
+      # deploy/values.yaml e o pre-requisito no README-STREAM.md.
       LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch-hml.svc.cluster.local:8123
     extraEgress:
       - namespace: kos-langwatch-hml

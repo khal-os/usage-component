@@ -217,6 +217,16 @@
         "irsaRoleArn": { "type": "string", "pattern": "^(arn:aws:iam::[0-9]{12}:role/.+)?$" }
       }
     },
+    "singleton": {
+      "description": "strategy: Recreate declara um SINGLETON SEM LEASE — dois processos do worker de ingestao ingerem o mesmo batch e duplicam traces (e a fatura); dois do scheduler fecham o mesmo mes duas vezes (PLANO §7, risco 3). `Recreate` sozinho nao impede isso: ele so garante que o pod velho morre antes do novo nascer, nao que exista UM. Por isso replicas tem de ser exatamente 1 aqui — a alternativa seria descobrir a duplicacao na fatura.",
+      "if": {
+        "required": ["strategy"],
+        "properties": { "strategy": { "const": "Recreate" } }
+      },
+      "then": {
+        "properties": { "replicas": { "const": 1 } }
+      }
+    },
     "sizing": {
       "description": "preset OU resources, jamais os dois — preset e uma decisao de TAMANHO, resources e a fuga para o caso que nao cabe em caixa nenhuma; declarar os dois esconde qual venceu.",
       "not": { "required": ["preset", "resources"] }
@@ -224,7 +234,10 @@
     "service": {
       "type": "object",
       "additionalProperties": false,
-      "allOf": [{ "$ref": "#/definitions/sizing" }],
+      "allOf": [
+        { "$ref": "#/definitions/sizing" },
+        { "$ref": "#/definitions/singleton" }
+      ],
       "required": ["enabled", "image", "replicas", "health"],
       "properties": {
         "enabled": { "type": "boolean" },

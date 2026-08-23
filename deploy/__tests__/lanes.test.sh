@@ -76,6 +76,29 @@ for f in "$HML" "$MAIN"; do
   contem "${n}: retag ANTES do pin"         "Probe autenticado + retag" "$(cat "$f")"
 done
 
+titulo "HOLD e lido ANTES de qualquer mutacao externa (CONTRATO §6)"
+# O gitops-pin.sh tambem checa o HOLD, mas ele roda no fim: na lane dev depois do
+# push da imagem, nas de promocao depois do retag. Como o ECR e IMMUTABLE, uma
+# tag publicada durante um freeze nao se desfaz — o freeze tem de ser a PRIMEIRA
+# coisa que a lane le.
+linha_de() { grep -n -m1 -- "$2" "$1" | cut -d: -f1; }
+for f in "$DEV" "$HML" "$MAIN"; do
+  n="$(basename "$f")"
+  contem "${n}: checa HOLD" "HOLD ativo? (freeze declarado no repo)" "$(cat "$f")"
+  L_HOLD="$(linha_de "$f" 'name: HOLD ativo?')"
+  # A primeira mutacao externa possivel de cada lane: assumir a role de OIDC ja
+  # e o passo que da poder de escrever no registry.
+  L_MUT="$(linha_de "$f" 'uses: aws-actions/configure-aws-credentials')"
+  if [ -n "$L_HOLD" ] && [ -n "$L_MUT" ] && [ "$L_HOLD" -lt "$L_MUT" ]; then
+    ok "${n}: HOLD (linha ${L_HOLD}) vem antes do OIDC/ECR (linha ${L_MUT})"
+  else
+    falha "${n}: HOLD em '${L_HOLD:-<ausente>}' nao precede a mutacao externa em '${L_MUT:-<ausente>}'"
+  fi
+done
+# Na lane dev o passo mora no job `resolver`, do qual `build` depende — e por
+# isso que ele precede tambem o build-push-action, que esta em outro job.
+contem "dev: o job de build depende do job que le o HOLD" "needs: resolver" "$(cat "$DEV")"
+
 titulo "coordenadas de infraestrutura"
 for f in "$DEV" "$HML" "$MAIN"; do
   contem "$(basename "$f"): role de OIDC do contrato" "$ROLE" "$(cat "$f")"
@@ -101,16 +124,38 @@ contem "dev: OIDC so no job de build" "id-token: write" "$(cat "$DEV")"
 contem "ci: somente leitura"          "contents: read"  "$(cat "$CI")"
 nao_contem "ci nao escreve no repo"   "contents: write" "$(cat "$CI")"
 
+titulo "eks-ci nao sequestra a esteira ECS que roda hoje"
+# `paths: deploy/**` no gatilho de pull_request colocaria este check — e com ele
+# o guard do §0.1 logo abaixo — em cima de todo PR de manutencao da esteira ECS
+# (deploy/taskdefs, deploy/scripts/deploy-tenant.sh, deploy/tenants), que e a que
+# serve producao ate o cutover. Vermelho impossivel de satisfazer nao e gate: e
+# ruido que ensina o time a ignorar check vermelho.
+GATILHO_PR="$(awk '/^  pull_request:/{p=1; next} p&&/^  [a-z_]+:/{exit} p' "$CI")"
+nao_contem "eks-ci nao observa deploy/** inteiro" "- 'deploy/**'" "$GATILHO_PR"
+for caminho in "- 'deploy/chart/**'" "- 'deploy/values-*.yaml'" "- 'deploy/__tests__/**'" "- '.github/workflows/eks-*.yml'"; do
+  contem "eks-ci observa ${caminho}" "$caminho" "$GATILHO_PR"
+done
+
 titulo "CONTRATO §0.1 — nada da esteira atual foi tocado"
 BASE="${KOS_BASE_REF:-origin/main}"
-if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
-  git fetch --no-tags --quiet origin main 2>/dev/null || true
-fi
-if git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
-  TOCADOS="$(git diff --name-status "$BASE" -- . | awk '$1 != "A" { print $1 " " $2 }')"
-  verifica "nenhum arquivo pre-existente modificado ou removido" "" "$TOCADOS"
+# O guard compara a arvore INTEIRA contra main e exige que tudo desta stream
+# seja arquivo NOVO. Isso so significa alguma coisa quando o que esta sendo
+# medido E esta stream — ou seja, nas branches `eks/**`. Num PR da esteira ECS o
+# mesmo diff acusaria como "modificado" um arquivo que esta stream nunca tocou.
+# Fora de eks/** o guard nao aprova nada: ele diz, em voz alta, que NAO mediu.
+REF="${KOS_REF_NAME:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}}"
+if [[ "$REF" != eks/* ]]; then
+  ok "NAO MEDIDO nesta ref ('${REF:-<desconhecida>}' nao e eks/**) — o guard do §0.1 mede as branches da stream; a esteira ECS tem os proprios checks"
 else
-  falha "nao consegui resolver ${BASE} — este guard NAO foi medido (defina KOS_BASE_REF ou traga a base)"
+  if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
+    git fetch --no-tags --quiet origin main 2>/dev/null || true
+  fi
+  if git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
+    TOCADOS="$(git diff --name-status "$BASE" -- . | awk '$1 != "A" { print $1 " " $2 }')"
+    verifica "nenhum arquivo pre-existente modificado ou removido" "" "$TOCADOS"
+  else
+    falha "nao consegui resolver ${BASE} — este guard NAO foi medido (defina KOS_BASE_REF ou traga a base)"
+  fi
 fi
 
 encerra "lanes"

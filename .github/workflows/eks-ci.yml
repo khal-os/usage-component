@@ -19,8 +19,25 @@ name: eks-ci
 
 on:
   pull_request:
+    # SO a arvore desta esteira, nunca `deploy/**`. `deploy/` no main e a casa da
+    # esteira ECS que serve producao HOJE (deploy/taskdefs/*.json,
+    # deploy/scripts/deploy-tenant.sh, deploy/tenants/*.env): um PR de
+    # manutencao daquela esteira nao tem nada a ver com o chart do EKS, e
+    # arrastava para dentro dele um check que ele nao tem como satisfazer (o
+    # guard do CONTRATO §0.1 reprova qualquer arquivo pre-existente modificado).
+    # Quando esta esteira virar A esteira, o cutover troca esta lista pelo
+    # `deploy/**` de volta — de proposito, num commit que se ve.
     paths:
-      - 'deploy/**'
+      - 'deploy/chart/**'
+      - 'deploy/values.yaml'
+      - 'deploy/values-*.yaml'
+      - 'deploy/values.schema.json'
+      - 'deploy/services.sh'
+      - 'deploy/gitops-pin.sh'
+      - 'deploy/verify-argo.sh'
+      - 'deploy/bootstrap-eks-repo.sh'
+      - 'deploy/__tests__/**'
+      - 'deploy/README-STREAM.md'
       - '.github/workflows/eks-*.yml'
   push:
     branches: ['eks/**']
