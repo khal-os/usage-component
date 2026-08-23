@@ -673,3 +673,117 @@ $ diff <(render sem o -f do cliente) <(render com)              vazio  (os dois 
 $ diff <(render sem) <(render com o cliente PERTURBADO)         28 linhas mudam,
                                                                  'PERTURBADO' 14× no YAML final
 ```
+
+---
+
+## Opt-out da auto-instrumentação otel do addon EKS (2026-08-23)
+
+### O incidente
+
+O addon EKS `amazon-cloudwatch-observability` v6.3.0 está instalado no
+`hapvida-dev` com a configuração default, e ela auto-instrumenta workloads do
+cluster inteiro: 4 init-containers otel por pod. Medido: 15 pods dos namespaces
+`kos-*`, OOMKill (137) do `langwatch-langevals` e 4 recursos do
+`hv-kos-langwatch-hml` em drift OutOfSync permanente. A surface `cx-metrics-v2`
+sofre do mesmo.
+
+O drift não é transitório: o webhook do addon casa `UPDATE`, e isso inclui o
+**dry-run** do `ServerSideApply` com que o Argo calcula o diff. O previsto nunca
+bate com o git, e `selfHeal` reaplica em loop contra um mutador que sempre volta.
+
+### O opt-out — e o seu CONJUNTO DE VALIDADE
+
+O **addon não é tocado** (componente compartilhado da frota). O operador respeita
+annotation já presente no workload: declarar `"false"` é o único opt-out por git.
+
+**Mas só onde ele governa.** Os args do controller, lidos ao vivo:
+
+```
+--auto-annotation-config={"java":{"daemonsets":[],"deployments":[],
+     "namespaces":[],"statefulsets":[]}, ...}          <- TUDO VAZIO
+--auto-monitor-config={..., "monitorAllServices": true,
+     "languages":["java","python","dotnet","nodejs"]}
+```
+
+Quem anota é o **auto-monitor**, e o conjunto que ele governa é *"todo workload
+atrás de um Service"*. **Dentro** dele a annotation declarada é respeitada — o
+opt-out funciona. **Fora** dele o reconciliador de `auto-annotation` (config
+vazia) trata as 8 chaves como órfãs e **as remove na admissão**: o Argo aplica, o
+objeto nem muda de `generation`, e a Application fica OutOfSync **para sempre**.
+
+Foi medido no `kos-langwatch-hml`, onde a primeira versão desta correção
+declarou o opt-out em dois workloads fora do conjunto e produziu exatamente o
+drift que veio apagar (khal-deploy PR #258 → corrigido no #259):
+
+```
+$ kubectl apply --server-side --dry-run=server -f <STS fora do conjunto, COM as 8>
+  PREVISTO: as 8 annotations SOMEM
+$ kubectl get sts <ele> --show-managed-fields
+  argocd-controller Apply -> DONO das 8;  o objeto NÃO as tem;  generation: 1
+```
+
+Neste chart o conjunto é exatamente `$svc.port`: `service.yaml` renderiza um
+Service quando há porta, e o seletor dele são os labels do pod template.
+
+| workload | Service | opt-out |
+|---|---|---|
+| `api` | sim | **8/8** |
+| `trace-ingestion-worker` | **não** | 0/8 — e também nunca recebe init-container otel |
+| Job `migrations`, CronJob `backup` | não | 0/8 (e `jobs`/`cronjobs` nem estão nos recursos do webhook de workload) |
+
+### O que mudou
+
+| arquivo | mudança |
+|---|---|
+| `deploy/chart/templates/deployment.yaml` | pod template = `mergeOverwrite(global, $svc.podAnnotations)`, com o **global aplicado só quando há `port`** |
+| `deploy/values.yaml` | `podAnnotations` global com as 8 chaves, `'false'` como **string quotada** |
+| `deploy/chart/values.schema.json` | `definitions/annotationMap` (`additionalProperties: {type: string}`); `podAnnotations` no topo e, por serviço, apertado de `{type: object}` para `annotationMap` |
+| `deploy/__tests__/chart-contract.test.sh` | 2 asserções novas por ambiente, nos **dois** sentidos |
+
+`$svc.podAnnotations` (por serviço) segue valendo para todos — quem escreve ali
+está declarando algo daquele serviço, não herdando um default. No
+`khal-platform` o gate não existe porque `port` é **obrigatório** na schema: lá
+todo serviço está dentro do conjunto.
+
+### O guard C0 lia o placeholder do values do ambiente
+
+Corrigido no mesmo lote, por simetria com o khal-platform e **antes de
+disparar**. O guard de fail-closed lia o estado "branch nunca buildada" do
+próprio `deploy/values-<env>.yaml`. Funciona só enquanto nenhuma lane pinou: no
+khal-platform, o primeiro pin de `eks/dev` (commit `d6bfcc1`) deixou o guard
+equivalente **reprovando um repo correto** — sem placeholder no values o render
+sai, e a asserção "tem de falhar" falha; seis asserções vermelhas e o `eks-ci`
+barrando todo push. Aqui a lane ainda não rodou (sem permissão de push), então a
+armadilha fecha antes de disparar: o guard passa a **construir** o overlay de
+placeholders a partir de `deploy/values.yaml`.
+
+Também foi corrigido um **falso verde** na asserção nova: `python3 - <<script
+<<<dados` tem duas redireções de stdin e a última vence — o Python leria o YAML
+como se fosse o script, e a asserção passaria sempre. O render agora vai por
+arquivo em `argv`.
+
+### Evidência
+
+```
+$ bash deploy/__tests__/run-all.sh                 TODAS as suites passaram
+    chart-contract: 104 ok, 0 falha   (eram 98)
+    lanes:           84 ok, 0 falha
+
+$ helm template × {dev,hml,prod} com pins válidos
+    Deployment api                     Service=True   opt-out 8/8
+    Deployment trace-ingestion-worker  Service=False  opt-out 0/8
+    Job migrations / CronJob backup                   opt-out 0/8
+    nenhum valor booleano; todos string
+
+# NÃO-VÁCUO 1 — as asserções novas contra o chart ANTERIOR (global em TUDO)
+$ (git archive HEAD | tar -x) && bash deploy/__tests__/chart-contract.test.sh
+    6 falhas — as duas asserções × 3 ambientes
+
+# NÃO-VÁCUO 2 — o guard C0, com o fail-closed neutralizado
+#   (_helpers.tpl:68 -> `{{- if and false (eq $digest …) }}`)
+#   E com values-<env>.yaml simulando uma lane que já pinou
+$ bash deploy/__tests__/chart-contract.test.sh
+    101 ok, 3 falha  — "renderizou com o placeholder (deveria falhar fechado)"
+    nos 3 ambientes. O guard antigo, nesse mesmo estado, ficaria VERDE por
+    vacuidade (não haveria placeholder nenhum no values para ele encontrar).
+```

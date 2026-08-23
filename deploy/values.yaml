@@ -62,6 +62,51 @@ images:
     dockerfile: docker/usage-db-backup.Dockerfile
     context: .
 
+# ── Annotations do POD TEMPLATE (globais) ────────────────────────────────────
+# Mescladas com `services.<svc>.podAnnotations` (o servico vence no conflito).
+#
+# VALEM SO PARA SERVICO COM `port` — isto e, com Service. Nao e economia de
+# YAML: e o CONJUNTO DE VALIDADE do opt-out abaixo. Ver o comentario longo em
+# deploy/chart/templates/deployment.yaml. Em uma frase: quem anota e o
+# auto-monitor do addon, ele governa "workload atras de um Service", e FORA
+# desse conjunto as 8 chaves sao REMOVIDAS na admissao — declara-las la vira
+# drift OutOfSync permanente, o oposto do que se queria. `trace-ingestion-worker`
+# nao tem Service, e tambem nunca recebe init-container otel.
+#
+# POR QUE ISTO EXISTE — incidente de 2026-08-23 no cluster hapvida-dev:
+# o addon EKS `amazon-cloudwatch-observability` (v6.3.0, config default da
+# frota) tem o auto-annotate da auto-instrumentacao LIGADO. O webhook
+# `mworkload.kb.io` dele casa daemonsets/deployments/statefulsets em CREATE e
+# UPDATE, em TODO namespace, e escreve
+#   cloudwatch.aws.amazon.com/auto-annotate-<lang>: "true"
+#   instrumentation.opentelemetry.io/inject-<lang>:  "true"
+# para as 4 linguagens; o webhook de pod injeta entao 4 init-containers otel.
+# Medido: 15 pods dos namespaces kos-* afetados, OOMKill (137) no
+# `langwatch-langevals` e 4 recursos do `hv-kos-langwatch-hml` OutOfSync
+# PERMANENTE — o webhook muta ate o dry-run do ServerSideApply com que o Argo
+# calcula o diff, entao o previsto nunca bate com o git e `selfHeal` reaplica em
+# loop contra um mutador que sempre volta. A surface cx-metrics-v2 sofre do
+# mesmo; nao e especifico do kos.
+#
+# O ADDON NAO E TOCADO (componente compartilhado da frota). O operador RESPEITA
+# annotation ja presente no workload: declarar `"false"` e o unico opt-out por
+# git que ele oferece.
+#
+# `'false'` entre ASPAS: annotation e map[string]string, e um `false` YAML nu
+# vira booleano e o render quebra.
+#
+# Para VOLTAR a instrumentar um servico: `services.<svc>.podAnnotations` com
+# `instrumentation.opentelemetry.io/inject-nodejs: 'true'` (o servico vence).
+podAnnotations:
+  instrumentation.opentelemetry.io/inject-java: 'false'
+  instrumentation.opentelemetry.io/inject-nodejs: 'false'
+  instrumentation.opentelemetry.io/inject-python: 'false'
+  instrumentation.opentelemetry.io/inject-dotnet: 'false'
+  cloudwatch.aws.amazon.com/auto-annotate-java: 'false'
+  cloudwatch.aws.amazon.com/auto-annotate-nodejs: 'false'
+  cloudwatch.aws.amazon.com/auto-annotate-python: 'false'
+  cloudwatch.aws.amazon.com/auto-annotate-dotnet: 'false'
+
 # ── Servicos ─────────────────────────────────────────────────────────────────
 # `services` e um MAPA (nome -> spec) de proposito: mapa mescla entre valueFiles,
 # lista substitui. Um cliente que precise mudar so as replicas da api nao deve

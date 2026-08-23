@@ -10,6 +10,14 @@
     "namespace": { "type": "string" },
     "secretsPathPrefix": { "type": "string" },
     "placeholderDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "podAnnotations": {
+      "allOf": [
+        { "$ref": "#/definitions/annotationMap" },
+        {
+          "description": "Annotations aplicadas ao pod template de TODO Deployment do chart, mescladas com `services.<svc>.podAnnotations` (o servico vence). O default de deploy/values.yaml sao as 8 chaves de opt-out da auto-instrumentacao otel do addon EKS `amazon-cloudwatch-observability`: o addon respeita annotation ja declarada no workload, e e o unico opt-out por git que ele oferece."
+        }
+      ]
+    },
     "common": {
       "type": "object",
       "additionalProperties": false,
@@ -88,6 +96,11 @@
     }
   },
   "definitions": {
+    "annotationMap": {
+      "type": "object",
+      "description": "Annotations de pod template. Annotation em Kubernetes e map[string]string: o schema exige STRING em todo valor, e e isto que reprova o `false` YAML nu (booleano) que quebraria o render das 8 chaves de opt-out do addon amazon-cloudwatch-observability — ver deploy/values.yaml, secao `podAnnotations`.",
+      "additionalProperties": { "type": "string" }
+    },
     "ecrRepository": {
       "type": "string",
       "description": "Toda imagem deste produto vive em <conta-registry>.dkr.ecr.<regiao>.amazonaws.com/kos/<nome>. Um repositorio fora desse molde e, na pratica, uma imagem que ninguem sabe quem construiu.",
@@ -265,7 +278,7 @@
         "secrets": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "extraEgress": { "$ref": "#/definitions/egressList" },
         "serviceAccount": { "$ref": "#/definitions/serviceAccountRef" },
-        "podAnnotations": { "type": "object" },
+        "podAnnotations": { "$ref": "#/definitions/annotationMap" },
         "deploymentAnnotations": { "type": "object" },
         "extraVolumes": { "type": "array" },
         "extraVolumeMounts": { "type": "array" },

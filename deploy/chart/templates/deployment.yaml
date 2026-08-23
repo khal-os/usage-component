@@ -49,7 +49,31 @@ spec:
     metadata:
       labels:
         {{- include "kos.labels" $ctx | nindent 8 }}
-      {{- with $svc.podAnnotations }}
+      {{- /* Annotations do POD TEMPLATE = global (`$.Values.podAnnotations`)
+         mesclado com o do servico, que VENCE no conflito.
+
+         O `$svc.port` NAO e um detalhe de gosto — e o conjunto de validade do
+         opt-out otel que mora no global. Medido no hapvida-dev em 2026-08-23:
+         o addon `amazon-cloudwatch-observability` v6.3.0 roda com
+         `--auto-annotation-config` TODO VAZIO e `--auto-monitor-config` com
+         `monitorAllServices: true`. Quem anota e o AUTO-MONITOR, e o conjunto
+         que ele governa e "todo workload ATRAS DE UM SERVICE". Dentro dele a
+         annotation declarada e RESPEITADA (o opt-out funciona); FORA dele o
+         reconciliador de auto-annotation trata as 8 chaves como orfas e as
+         REMOVE na admissao — o Argo aplica, o objeto nem muda de `generation`,
+         e a Application fica OutOfSync PARA SEMPRE.
+         Aqui `service.yaml` renderiza Service exatamente quando ha `port`, e o
+         seletor dele sao os labels deste pod template. Entao `$svc.port` e o
+         teste exato: `trace-ingestion-worker` (sem porta, sem Service) nao pode
+         receber o global, e tambem nunca recebe init-container otel — fora do
+         conjunto do auto-monitor nao ha injecao para desligar.
+         `$svc.podAnnotations` continua valendo para TODOS: quem escreve ali esta
+         declarando algo especifico daquele servico, e nao herdando um default.
+         (No khal-platform o gate nao existe porque `port` e OBRIGATORIO na
+         schema — la todo servico esta dentro do conjunto.) */}}
+      {{- $globalAnn := ternary ($.Values.podAnnotations | default dict) dict (hasKey $svc "port") }}
+      {{- $podAnn := mergeOverwrite (deepCopy $globalAnn) (deepCopy ($svc.podAnnotations | default dict)) }}
+      {{- with $podAnn }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

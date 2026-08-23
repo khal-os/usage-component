@@ -53,9 +53,33 @@ done
 
 titulo "fail-closed: placeholder de branch nunca buildada"
 # Esta e a invariante que impede um deploy de subir 'do nada' com imagem errada:
-# enquanto a lane dev nao pinar, o chart NAO renderiza.
+# um servico HABILITADO que chega ao render com o placeholder derruba o render.
+#
+# O estado "branch nunca buildada" e CONSTRUIDO aqui, nao lido de
+# deploy/values-<env>.yaml. Ler dali funciona so enquanto nenhuma lane pinou:
+# no khal-platform, o primeiro pin de `eks/dev` (2026-08-23, commit d6bfcc1)
+# deixou o guard equivalente REPROVANDO UM REPO CORRETO — sem placeholder no
+# values, o render sai, e a assercao "tem de falhar" falha. Seis assercoes
+# vermelhas e o eks-ci barrando todo push. Aqui a lane ainda nao rodou; a
+# armadilha e a mesma, e fecha antes de disparar.
+OVERLAY_PH="$(mktemp)"; trap 'rm -f "$OVERLAY_PH"' EXIT
+python3 - deploy/values.yaml deploy/values-dev.yaml > "$OVERLAY_PH" <<'PYPH'
+import sys, yaml
+ph = None
+for arq in sys.argv[1:]:
+    v = yaml.safe_load(open(arq)) or {}
+    ph = v.get("placeholderDigest", ph)
+    pins = v.get("pins") or {}
+    if pins:
+        nomes = list(pins)
+assert ph, "placeholderDigest nao declarado em nenhum values"
+yaml.safe_dump(
+    {"pins": {n: {"digest": ph, "gitSha": "0" * 40} for n in nomes}},
+    sys.stdout, default_flow_style=False,
+)
+PYPH
 for env in dev hml prod; do
-  if OUT="$(render "$env")"; then
+  if OUT="$(render "$env" -f "$OVERLAY_PH")"; then
     falha "${env}: renderizou com o placeholder (deveria falhar fechado)"
   else
     contem "${env}: falha fechada cita o PLACEHOLDER" "PLACEHOLDER" "$OUT"
@@ -66,6 +90,63 @@ titulo "o chart nunca renderiza segredo nem pull secret"
 for env in dev hml prod; do
   nao_contem "${env}: sem 'kind: Secret'"    "kind: Secret"      "${RENDER[$env]}"
   nao_contem "${env}: sem imagePullSecrets"  "imagePullSecrets"  "${RENDER[$env]}"
+done
+
+titulo "opt-out otel exatamente nos workloads ATRAS DE UM SERVICE"
+# O addon EKS `amazon-cloudwatch-observability` (v6.3.0, default da frota) MUTA o
+# pod template de todo Deployment do cluster e o webhook injeta 4 init-containers
+# otel por pod. Custo medido em 2026-08-23 no hapvida-dev: OOMKill (137) do
+# langwatch-langevals e 4 recursos do hv-kos-langwatch-hml em drift OutOfSync
+# permanente. O operador RESPEITA annotation ja declarada no workload — e o unico
+# opt-out por git, e por isso ele mora no CHART e nao no addon (addon e
+# componente compartilhado da frota).
+# A assercao exige a STRING "false": annotation e map[string]string, e um `false`
+# YAML nu vira booleano e quebra o render.
+for env in dev hml prod; do
+  # O render vai por ARQUIVO, nao por stdin: `python3 - <<script <<<dados` tem
+  # DUAS redirecoes de stdin e a ultima vence — o python leria o YAML como se
+  # fosse o script, e a assercao passaria sempre (falso verde comprovado).
+  ALVO="$(mktemp)"; printf '%s' "${RENDER[$env]}" > "$ALVO"
+  RUIM="$(python3 - "$ALVO" <<'PYOTEL'
+import sys, yaml
+CHAVES = [f'instrumentation.opentelemetry.io/inject-{l}' for l in ('java', 'nodejs', 'python', 'dotnet')] \
+       + [f'cloudwatch.aws.amazon.com/auto-annotate-{l}' for l in ('java', 'nodejs', 'python', 'dotnet')]
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+# O conjunto de validade do opt-out: workload ATRAS DE UM SERVICE. Calculado do
+# proprio render (Service cujo seletor casa os labels do pod template), nao de
+# uma lista de nomes que envelhece.
+selectores = [s['spec'].get('selector') or {} for s in docs if s.get('kind') == 'Service']
+ruim, n = [], 0
+for d in docs:
+    if d.get('kind') != 'Deployment':
+        continue
+    n += 1
+    nome = d['metadata']['name']
+    labels = d['spec']['template']['metadata'].get('labels') or {}
+    ann = (d['spec']['template']['metadata'].get('annotations') or {})
+    atras_de_service = any(sel and all(labels.get(k) == v for k, v in sel.items()) for sel in selectores)
+    if atras_de_service:
+        faltando = [k for k in CHAVES if ann.get(k) != 'false']
+        if faltando:
+            ruim.append(f"{nome} (com Service): faltam {faltando}")
+    else:
+        # FORA do conjunto declarar e PIOR que nao declarar: o addon remove as
+        # chaves na admissao e a Application fica OutOfSync para sempre.
+        sobrando = [k for k in CHAVES if k in ann]
+        if sobrando:
+            ruim.append(f"{nome} (SEM Service): declara {sobrando} — vira drift permanente")
+if n == 0:
+    ruim.append('nenhum Deployment no render')
+print('; '.join(ruim))
+PYOTEL
+)"
+  rm -f "$ALVO"
+  verifica "${env}: as 8 annotations exatamente onde valem" "" "$RUIM"
+  # A mesma coisa lida CRUA do YAML: se o merge global x por servico quebrar,
+  # esta linha some do render.
+  N_SVC="$(grep -c '^kind: Service$' <<<"${RENDER[$env]}")"
+  N_PY="$(grep -c 'instrumentation.opentelemetry.io/inject-python: "false"' <<<"${RENDER[$env]}")"
+  verifica "${env}: inject-python \"false\" em um pod template por Service" "$N_SVC" "$N_PY"
 done
 
 titulo "toda imagem e <registry>/kos/<nome>@sha256:<64hex>"
