@@ -1,0 +1,7 @@
+# INVALIDA: certificate-arn no Ingress do app (o cert do grupo entra por append
+# CSV no Ingress-fonte, nunca aqui).
+services:
+  api:
+    ingress:
+      annotations:
+        alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:sa-east-1:701016785827:certificate/aaaa

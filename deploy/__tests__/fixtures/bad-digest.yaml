@@ -1,0 +1,5 @@
+# INVALIDA: "digest" que na verdade e uma tag.
+pins:
+  usage-module:
+    digest: "dev-abc123"
+    gitSha: "1111111111111111111111111111111111111111"

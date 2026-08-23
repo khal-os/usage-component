@@ -1,0 +1,6 @@
+# INVALIDA: repositorio fora do ECR de produto (kos/<nome>).
+images:
+  usage-module:
+    repository: docker.io/evil/usage-module
+    dockerfile: docker/module.Dockerfile
+    context: .
