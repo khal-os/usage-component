@@ -59,7 +59,7 @@ services:
       # `development` liga defaults inseguros; dev e hml rodam `homolog`
       # (fail-secure) e so prod roda `production`.
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_dev
+      MONGO_USAGE_DB_NAME: usage_db
       KHAL_AUTH_URL: https://auth-dev.hapvida.khal.ai
       # Apex do desktop (fora de *.hapvida) + wildcard de UM label do ambiente.
       # O parser aceita `https://*.<dominio>` e casa exatamente um label — nunca
@@ -69,7 +69,7 @@ services:
   trace-ingestion-worker:
     envOverride:
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_dev
+      MONGO_USAGE_DB_NAME: usage_db
       # dev NAO tem LangWatch proprio: usa o de hml (CONTRATO §3). Consequencia
       # de ordem: `kos-langwatch-hml` (stream D/E) precisa estar de pe ANTES do
       # primeiro sync de kos-components-dev — sem ClickHouse o worker sai 1 no
@@ -84,20 +84,20 @@ services:
   billing-close-scheduler:
     envOverride:
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_dev
+      MONGO_USAGE_DB_NAME: usage_db
 
 jobs:
   migrations:
     envOverride:
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_dev
+      MONGO_USAGE_DB_NAME: usage_db
 
 cronjobs:
   backup:
     serviceAccount:
       irsaRoleArn: arn:aws:iam::701016785827:role/hv-kos-usage-backup-dev
     envOverride:
-      MONGO_USAGE_DB_NAME: hapvida_dev
+      MONGO_USAGE_DB_NAME: usage_db
       # RECONCILIADO 2026-08-23 (RECONCILIATION.md, topico 2): o nome CANONICO
       # do bucket e `hv-kos-usage-backups-<env>` — PLURAL. Nao e escolha de
       # gosto: e o nome que o `aws_s3_bucket` do modulo `kos-client-foundation`

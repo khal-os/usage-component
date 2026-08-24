@@ -47,14 +47,14 @@ services:
       host: api-hml.hapvida.khal.ai
     envOverride:
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_hml
+      MONGO_USAGE_DB_NAME: usage_db
       KHAL_AUTH_URL: https://auth-hml.hapvida.khal.ai
       CORS_ALLOWED_ORIGINS: https://hapvida-hml.khal.ai,https://*.hapvida.khal.ai
 
   trace-ingestion-worker:
     envOverride:
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_hml
+      MONGO_USAGE_DB_NAME: usage_db
       LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch-hml.svc.cluster.local:8123
     extraEgress:
       - namespace: kos-langwatch-hml
@@ -64,20 +64,20 @@ services:
   billing-close-scheduler:
     envOverride:
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_hml
+      MONGO_USAGE_DB_NAME: usage_db
 
 jobs:
   migrations:
     envOverride:
       ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: hapvida_hml
+      MONGO_USAGE_DB_NAME: usage_db
 
 cronjobs:
   backup:
     serviceAccount:
       irsaRoleArn: arn:aws:iam::701016785827:role/hv-kos-usage-backup-hml
     envOverride:
-      MONGO_USAGE_DB_NAME: hapvida_hml
+      MONGO_USAGE_DB_NAME: usage_db
       # RECONCILIADO 2026-08-23 (RECONCILIATION.md, topico 2): o nome CANONICO
       # do bucket e `hv-kos-usage-backups-<env>` — PLURAL. Nao e escolha de
       # gosto: e o nome que o `aws_s3_bucket` do modulo `kos-client-foundation`
