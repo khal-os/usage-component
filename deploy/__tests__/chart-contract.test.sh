@@ -63,7 +63,7 @@ titulo "fail-closed: placeholder de branch nunca buildada"
 # vermelhas e o eks-ci barrando todo push. Aqui a lane ainda nao rodou; a
 # armadilha e a mesma, e fecha antes de disparar.
 OVERLAY_PH="$(mktemp)"; trap 'rm -f "$OVERLAY_PH"' EXIT
-python3 - deploy/values.yaml deploy/values-dev.yaml > "$OVERLAY_PH" <<'PYPH'
+python3 - deploy/chart/values.yaml deploy/values.yaml deploy/values-dev.yaml > "$OVERLAY_PH" <<'PYPH'
 import sys, yaml
 ph = None
 for arq in sys.argv[1:]:
