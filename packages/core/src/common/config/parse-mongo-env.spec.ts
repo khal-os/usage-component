@@ -55,6 +55,24 @@ describe('shared Mongo env parser (audit C-6)', () => {
     expect(schema.safeParse({ MONGO_USAGE_DB_NAME: '' }).success).toBe(false);
   });
 
+  it("MUST treat '' (compose `${VAR:-}` forwarding) as unset for the validated optionals", () => {
+    // A fresh client env never writes MONGO_DB_ATLAS, and compose forwards
+    // `${MONGO_DB_ATLAS:-}` — the enum rejected that empty string and
+    // crash-looped the api container on a clean local deploy.
+    const parsed = schema.parse({
+      MONGO_USAGE_DB_NAME: 'observability',
+      MONGO_DB_ATLAS: '',
+      MONGO_DB_PORT: '',
+    });
+
+    expect(toMongoDbEnvironment(parsed)).toEqual(
+      expect.objectContaining({
+        mongoDbAtlas: undefined,
+        mongoDbPort: undefined,
+      }),
+    );
+  });
+
   it('MUST refuse a non-integer port and an invalid atlas flag', () => {
     const base = { MONGO_USAGE_DB_NAME: 'observability' };
 
