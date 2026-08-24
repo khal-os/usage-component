@@ -1,0 +1,387 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "kos-components — contrato dos values",
+  "description": "Reprova, ANTES do cluster ver qualquer coisa: valor literal em chave de segredo, servico sem readiness, preset junto de resources, e digest que nao e um sha256 de 64 hex. Cada uma dessas quatro ja foi um incidente em algum repo da frota; a schema existe para que a proxima seja um erro de `helm template`.",
+  "type": "object",
+  "_comment_additionalProperties": "false, e nao true, por causa de um achado real da reconciliacao cross-stream (2026-08-23): os arquivos de cliente do khal-deploy tinham sido escritos com um vocabulario inventado (`global.tenant`, `services.<x>.envFrom`) e o Helm os aceitou em silencio — `helm template` com e sem o arquivo dava o mesmo YAML. Uma chave de topo desconhecida nunca e um extra inofensivo: e sempre alguem achando que configurou algo. Aqui ela vira erro de render.",
+  "additionalProperties": false,
+  "properties": {
+    "namePrefix": { "type": "string" },
+    "namespace": { "type": "string" },
+    "secretsPathPrefix": { "type": "string" },
+    "placeholderDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "podAnnotations": {
+      "allOf": [
+        { "$ref": "#/definitions/annotationMap" },
+        {
+          "description": "Annotations aplicadas ao pod template de TODO Deployment do chart, mescladas com `services.<svc>.podAnnotations` (o servico vence). O default de deploy/values.yaml sao as 8 chaves de opt-out da auto-instrumentacao otel do addon EKS `amazon-cloudwatch-observability`: o addon respeita annotation ja declarada no workload, e e o unico opt-out por git que ele oferece."
+        }
+      ]
+    },
+    "common": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "surface": { "type": "string", "minLength": 1 },
+        "client": { "type": "string" },
+        "environment": { "type": "string", "enum": ["", "dev", "hml", "prod"] }
+      }
+    },
+    "presets": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/resources" }
+    },
+    "externalSecrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storeKind": { "type": "string", "enum": ["ClusterSecretStore", "SecretStore"] },
+        "storeName": { "type": "string" },
+        "refreshInterval": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ingressDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "className": { "type": "string", "const": "alb" },
+        "groupName": { "type": "string" },
+        "scheme": { "type": "string", "enum": ["internet-facing", "internal"] },
+        "targetType": { "type": "string", "enum": ["ip", "instance"] },
+        "pathType": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    },
+    "albSubnetCidrs": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$" }
+    },
+    "extraEgress": { "$ref": "#/definitions/egressList" },
+    "images": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "dockerfile", "context"],
+        "properties": {
+          "repository": { "$ref": "#/definitions/ecrRepository" },
+          "dockerfile": { "type": "string", "minLength": 1 },
+          "context": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "pins": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["digest", "gitSha"],
+        "properties": {
+          "digest": { "$ref": "#/definitions/digest" },
+          "gitSha": { "$ref": "#/definitions/gitSha" }
+        }
+      }
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/service" }
+    },
+    "jobs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/hookJob" }
+    },
+    "cronjobs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/cronJob" }
+    }
+  },
+  "definitions": {
+    "annotationMap": {
+      "type": "object",
+      "description": "Annotations de pod template. Annotation em Kubernetes e map[string]string: o schema exige STRING em todo valor, e e isto que reprova o `false` YAML nu (booleano) que quebraria o render das 8 chaves de opt-out do addon amazon-cloudwatch-observability — ver deploy/values.yaml, secao `podAnnotations`.",
+      "additionalProperties": { "type": "string" }
+    },
+    "ecrRepository": {
+      "type": "string",
+      "description": "Toda imagem deste produto vive em <conta-registry>.dkr.ecr.<regiao>.amazonaws.com/kos/<nome>. Um repositorio fora desse molde e, na pratica, uma imagem que ninguem sabe quem construiu.",
+      "pattern": "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/kos/[a-z0-9][a-z0-9._-]*$"
+    },
+    "digest": {
+      "type": "string",
+      "description": "Vazio (o pin ainda nao aconteceu) ou sha256:<64 hex minusculos>. Tag NUNCA passa: tag e mutavel, e promover por tag e deixar 'o mesmo build' virar dois binarios entre homolog e producao. O placeholder de 64 zeros CASA este padrao de proposito — quem o reprova e o chart, com uma mensagem que explica que a branch nunca foi buildada.",
+      "pattern": "^(sha256:[0-9a-f]{64})?$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{40})?$"
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": { "$ref": "#/definitions/resourceQuantities" },
+        "limits": { "$ref": "#/definitions/resourceQuantities" }
+      }
+    },
+    "resourceQuantities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": { "type": ["string", "number"] },
+        "memory": { "type": ["string", "number"] }
+      }
+    },
+    "envEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Nome de variavel que TERMINA em _PASSWORD/_SECRET/_TOKEN/_KEY/_CREDENTIALS (ou e uma dessas palavras) NAO pode receber valor literal: credencial vem do Secrets Manager via ExternalSecret, por envFrom. KHAL_TOKEN_AUDIENCE passa porque nao termina em _TOKEN — o criterio e o sufixo, nao a substring.",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "not": {
+            "pattern": "(_PASSWORD|_PASSWD|_SECRET|_TOKEN|_KEY|_CREDENTIALS|^PASSWORD|^SECRET|^TOKEN)$"
+          }
+        },
+        "value": { "type": ["string", "number", "boolean"] }
+      }
+    },
+    "envOverride": {
+      "type": "object",
+      "description": "Mapa nome -> valor sobreposto pelo values do ambiente. Mesma regra de sufixo do `env`.",
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]*$",
+        "not": {
+          "pattern": "(_PASSWORD|_PASSWD|_SECRET|_TOKEN|_KEY|_CREDENTIALS|^PASSWORD|^SECRET|^TOKEN)$"
+        }
+      },
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "imageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "repository": { "$ref": "#/definitions/ecrRepository" },
+        "digest": { "$ref": "#/definitions/digest" },
+        "gitSha": { "$ref": "#/definitions/gitSha" }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "http (`path`) OU exec (`command`) — exatamente um dos dois.",
+      "properties": {
+        "path": { "type": "string", "pattern": "^/" },
+        "port": { "type": "integer" },
+        "command": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 },
+        "failureThreshold": { "type": "integer", "minimum": 1 },
+        "successThreshold": { "type": "integer", "minimum": 1 }
+      },
+      "oneOf": [
+        { "required": ["path"], "not": { "required": ["command"] } },
+        { "required": ["command"], "not": { "required": ["path"] } }
+      ]
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`readiness` e OBRIGATORIO: um pod que entra no Service sem criterio nenhum e um 502 esperando a hora certa.",
+      "required": ["readiness"],
+      "properties": {
+        "liveness": { "$ref": "#/definitions/probe" },
+        "readiness": { "$ref": "#/definitions/probe" },
+        "version": { "type": "string" }
+      }
+    },
+    "egressList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ports"],
+        "properties": {
+          "cidr": { "type": "string" },
+          "namespace": { "type": "string" },
+          "ports": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["port"],
+              "properties": {
+                "protocol": { "type": "string", "enum": ["TCP", "UDP"] },
+                "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+                "endPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "serviceAccountRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "irsaRoleArn": { "type": "string", "pattern": "^(arn:aws:iam::[0-9]{12}:role/.+)?$" }
+      }
+    },
+    "singleton": {
+      "description": "strategy: Recreate declara um SINGLETON SEM LEASE — dois processos do worker de ingestao ingerem o mesmo batch e duplicam traces (e a fatura); dois do scheduler fecham o mesmo mes duas vezes (PLANO §7, risco 3). `Recreate` sozinho nao impede isso: ele so garante que o pod velho morre antes do novo nascer, nao que exista UM. Por isso replicas tem de ser exatamente 1 aqui — a alternativa seria descobrir a duplicacao na fatura.",
+      "if": {
+        "required": ["strategy"],
+        "properties": { "strategy": { "const": "Recreate" } }
+      },
+      "then": {
+        "properties": { "replicas": { "const": 1 } }
+      }
+    },
+    "sizing": {
+      "description": "preset OU resources, jamais os dois — preset e uma decisao de TAMANHO, resources e a fuga para o caso que nao cabe em caixa nenhuma; declarar os dois esconde qual venceu.",
+      "not": { "required": ["preset", "resources"] }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        { "$ref": "#/definitions/sizing" },
+        { "$ref": "#/definitions/singleton" }
+      ],
+      "required": ["enabled", "image", "replicas", "health"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "group": { "type": "string" },
+        "image": { "$ref": "#/definitions/imageRef" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "servicePort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "command": { "type": "array", "items": { "type": "string" } },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "health": { "$ref": "#/definitions/health" },
+        "preset": { "type": "string", "enum": ["S", "M", "L"] },
+        "resources": { "$ref": "#/definitions/resources" },
+        "replicas": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "strategy": { "type": "string", "enum": ["RollingUpdate", "Recreate"] },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "revisionHistoryLimit": { "type": "integer", "minimum": 0 },
+        "tmpDir": { "type": "boolean" },
+        "tmpDirSizeLimit": { "type": "string" },
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "runAsGroup": { "type": "integer", "minimum": 1 },
+        "fsGroup": { "type": "integer", "minimum": 1 },
+        "env": { "type": "array", "items": { "$ref": "#/definitions/envEntry" } },
+        "envOverride": { "$ref": "#/definitions/envOverride" },
+        "secrets": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "extraEgress": { "$ref": "#/definitions/egressList" },
+        "serviceAccount": { "$ref": "#/definitions/serviceAccountRef" },
+        "podAnnotations": { "$ref": "#/definitions/annotationMap" },
+        "deploymentAnnotations": { "type": "object" },
+        "extraVolumes": { "type": "array" },
+        "extraVolumeMounts": { "type": "array" },
+        "sidecars": { "type": "array" },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "host": { "type": "string" },
+            "path": { "type": "string" },
+            "pathType": { "type": "string" },
+            "healthcheckPath": { "type": "string", "pattern": "^/" },
+            "annotations": {
+              "type": "object",
+              "description": "certificate-arn NAO entra aqui: o cert do IngressGroup e anexado por append CSV no Ingress-fonte do grupo. Um segundo dono do listener e briga silenciosa.",
+              "not": { "required": ["alb.ingress.kubernetes.io/certificate-arn"] }
+            }
+          }
+        },
+        "hpa": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicas": { "type": "integer", "minimum": 1 },
+            "maxReplicas": { "type": "integer", "minimum": 1 },
+            "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        }
+      }
+    },
+    "hookJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [{ "$ref": "#/definitions/sizing" }],
+      "required": ["enabled", "image", "command", "activeDeadlineSeconds"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "group": { "type": "string" },
+        "image": { "$ref": "#/definitions/imageRef" },
+        "command": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "hook": { "type": "string", "enum": ["PreSync", "Sync", "PostSync", "SyncFail"] },
+        "hookDeletePolicy": { "type": "string" },
+        "syncWave": { "type": ["string", "integer"] },
+        "esSyncWave": {
+          "type": ["string", "integer"],
+          "description": "sync-wave do ExternalSecret do proprio Job (default: syncWave - 1). O chart REPROVA um valor >= syncWave: um Job de hook le o Secret por envFrom, e o ES tem de estar Ready numa wave ANTERIOR — senao o pod trava em CreateContainerConfigError ate o activeDeadlineSeconds e derruba a fase PreSync inteira."
+        },
+        "backoffLimit": { "type": "integer", "minimum": 0, "maximum": 0 },
+        "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
+        "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "preset": { "type": "string", "enum": ["S", "M", "L"] },
+        "resources": { "$ref": "#/definitions/resources" },
+        "tmpDir": { "type": "boolean" },
+        "tmpDirSizeLimit": { "type": "string" },
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "runAsGroup": { "type": "integer", "minimum": 1 },
+        "fsGroup": { "type": "integer", "minimum": 1 },
+        "env": { "type": "array", "items": { "$ref": "#/definitions/envEntry" } },
+        "envOverride": { "$ref": "#/definitions/envOverride" },
+        "secrets": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "extraEgress": { "$ref": "#/definitions/egressList" },
+        "serviceAccount": { "$ref": "#/definitions/serviceAccountRef" }
+      }
+    },
+    "cronJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [{ "$ref": "#/definitions/sizing" }],
+      "required": ["enabled", "image", "schedule", "timeZone", "activeDeadlineSeconds"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "group": { "type": "string" },
+        "image": { "$ref": "#/definitions/imageRef" },
+        "command": { "type": "array", "items": { "type": "string" } },
+        "schedule": { "type": "string", "minLength": 1 },
+        "timeZone": {
+          "type": "string",
+          "description": "IANA, obrigatorio: sem ele o kube-controller-manager usa UTC e '0 7 * * *' roda 04:00 em Sao Paulo.",
+          "pattern": "^[A-Za-z]+/[A-Za-z_+-]+$"
+        },
+        "concurrencyPolicy": { "type": "string", "enum": ["Allow", "Forbid", "Replace"] },
+        "startingDeadlineSeconds": { "type": "integer", "minimum": 1 },
+        "successfulJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "failedJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
+        "preset": { "type": "string", "enum": ["S", "M", "L"] },
+        "resources": { "$ref": "#/definitions/resources" },
+        "tmpDir": { "type": "boolean" },
+        "tmpDirSizeLimit": { "type": "string" },
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "runAsGroup": { "type": "integer", "minimum": 1 },
+        "fsGroup": { "type": "integer", "minimum": 1 },
+        "env": { "type": "array", "items": { "$ref": "#/definitions/envEntry" } },
+        "envOverride": { "$ref": "#/definitions/envOverride" },
+        "secrets": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "extraEgress": { "$ref": "#/definitions/egressList" },
+        "serviceAccount": { "$ref": "#/definitions/serviceAccountRef" }
+      }
+    }
+  }
+}

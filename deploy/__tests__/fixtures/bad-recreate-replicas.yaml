@@ -1,0 +1,13 @@
+# INVALIDA DE PROPOSITO — singleton com mais de uma replica.
+#
+# `trace-ingestion-worker` declara `strategy: Recreate` em deploy/values.yaml:
+# e um laco de ingestao SEM LEASE. Duas replicas leem o mesmo batch, gravam os
+# mesmos traces e duplicam a fatura (PLANO §7, risco 3) — e `Recreate` nao
+# impede nada disso: ele so ordena morte-antes-de-nascimento.
+#
+# Antes desta regra o chart renderizava `replicas: 3` calado, e o PDB ainda
+# "degradava" sozinho de singleton para multi-replica. Quem reprova agora e a
+# schema, antes de qualquer cluster ver o manifesto.
+services:
+  trace-ingestion-worker:
+    replicas: 3

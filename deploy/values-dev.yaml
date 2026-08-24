@@ -1,0 +1,110 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEV — cluster `hapvida-dev` (conta 701016785827), namespace `kos-components-dev`
+# Branch do ambiente: `dev` (hoje `eks/dev`, ate o cutover).
+#
+# Duas coisas moram aqui e mais nada: (1) o PIN (escrito pela lane, nunca a mao)
+# e (2) o que muda por ambiente. A FORMA esta em deploy/values.yaml.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+common:
+  environment: dev
+
+# `namespace` fica VAZIO de proposito: quem manda e o destination.namespace da
+# Application do Argo. Para renderizar local, use `--namespace kos-components-dev`.
+
+# ClusterSecretStore do CLUSTER, nao do ambiente: hapvida-dev cobre dev E hml.
+externalSecrets:
+  storeName: hapvida-dev
+
+secretsPathPrefix: /hapvida/dev/kos/components
+
+ingressDefaults:
+  # IngressGroup do ambiente — um ALB para todos os apps de dev.
+  groupName: hapvida-dev
+
+# Subnets do ALB do grupo hapvida-dev (VPC 10.70.0.0/16). O ALB em target-type=ip
+# chega com IP das ENIs destas faixas.
+albSubnetCidrs:
+  - 10.70.240.0/24
+  - 10.70.241.0/24
+
+# Egress comum: Atlas via PrivateLink. O endpoint vive na VPC do cluster, e o
+# driver do Mongo abre 27017 e tambem portas altas dos membros do replica set.
+extraEgress:
+  - cidr: 10.70.0.0/16
+    ports:
+      - { protocol: TCP, port: 27017 }
+      - { protocol: TCP, port: 1024, endPort: 65535 }
+
+# ── Pins (ESCRITO POR deploy/gitops-pin.sh — nao editar a mao) ────────────────
+# O placeholder (64 zeros) faz o chart FALHAR FECHADO: esta branch ainda nunca
+# foi buildada, e renderizar `:latest` no lugar seria pior que nao renderizar.
+pins:
+  usage-module:
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    gitSha: "0000000000000000000000000000000000000000"
+  usage-connector:
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    gitSha: "0000000000000000000000000000000000000000"
+  usage-db-backup:
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    gitSha: "0000000000000000000000000000000000000000"
+
+services:
+  api:
+    replicas: 1
+    ingress:
+      host: api-dev.hapvida.khal.ai
+    envOverride:
+      # `development` liga defaults inseguros; dev e hml rodam `homolog`
+      # (fail-secure) e so prod roda `production`.
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: usage_db
+      KHAL_AUTH_URL: https://auth-dev.hapvida.khal.ai
+      # Apex do desktop (fora de *.hapvida) + wildcard de UM label do ambiente.
+      # O parser aceita `https://*.<dominio>` e casa exatamente um label — nunca
+      # `*` nu (audit D-1) e nunca http.
+      CORS_ALLOWED_ORIGINS: https://hapvida-dev.khal.ai,https://*.hapvida.khal.ai
+
+  trace-ingestion-worker:
+    envOverride:
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: usage_db
+      # dev NAO tem LangWatch proprio: usa o de hml (CONTRATO §3). Consequencia
+      # de ordem: `kos-langwatch-hml` (stream D/E) precisa estar de pe ANTES do
+      # primeiro sync de kos-components-dev — sem ClickHouse o worker sai 1 no
+      # boot e o gate reprova o deploy inteiro. Ver a nota do workload em
+      # deploy/values.yaml e o pre-requisito no README-STREAM.md.
+      LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch-hml.svc.cluster.local:8123
+    extraEgress:
+      - namespace: kos-langwatch-hml
+        ports:
+          - { protocol: TCP, port: 8123 }
+
+  billing-close-scheduler:
+    envOverride:
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: usage_db
+
+jobs:
+  migrations:
+    envOverride:
+      ENVIRONMENT: homolog
+      MONGO_USAGE_DB_NAME: usage_db
+
+cronjobs:
+  backup:
+    serviceAccount:
+      irsaRoleArn: arn:aws:iam::701016785827:role/hv-kos-usage-backup-dev
+    envOverride:
+      MONGO_USAGE_DB_NAME: usage_db
+      # RECONCILIADO 2026-08-23 (RECONCILIATION.md, topico 2): o nome CANONICO
+      # do bucket e `hv-kos-usage-backups-<env>` — PLURAL. Nao e escolha de
+      # gosto: e o nome que o `aws_s3_bucket` do modulo `kos-client-foundation`
+      # (khal-infra, stream A) cria, provado no `tofu plan` (`BUCKET
+      # hv-kos-usage-backups-<env>`), e e o unico ARN que a policy da role
+      # `hv-kos-usage-backup-<env>` autoriza. Com o singular, o CronJob subiria
+      # com a credencial certa e levaria AccessDenied num bucket que nao existe.
+      # (A ROLE segue no singular `hv-kos-usage-backup-<env>`: e outro nome,
+      # noutro namespace da AWS, e quem manda nele tambem e o Tofu.)
+      BACKUP_BUCKET: hv-kos-usage-backups-dev

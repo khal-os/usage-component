@@ -1,0 +1,85 @@
+{{- /*
+Job de migracao como hook PreSync do Argo — renderizado SOMENTE quando
+`jobs.migrations` esta declarado e habilitado (CONTRATO §5).
+
+  backoffLimit: 0            exit 1 e RESULTADO (diagnostico), nao erro para
+                             retry: uma migracao que falha e re-tentada sozinha
+                             troca um erro legivel por um estado indeterminado.
+  activeDeadlineSeconds      sempre; sem ele um hook travado prende o sync.
+  hook-delete-policy         BeforeHookCreation: o Job da rodada ANTERIOR fica no
+                             cluster ate a proxima — e onde o log e lido depois
+                             que a lane ja fechou.
+  restartPolicy: Never       com backoffLimit 0, `OnFailure` reiniciaria o
+                             container no MESMO pod e furaria o limite.
+
+⚠ Sync PARCIAL do Argo PULA hooks PreSync (pegadinha conhecida da frota): a
+migracao "nunca rodou" e a api sobe 503 com o worker em CrashLoop. Sync cheio.
+*/ -}}
+{{- range $name, $job := .Values.jobs }}
+{{- if $job.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $job }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kos.name" $ctx }}
+  namespace: {{ include "kos.namespace" $ }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: {{ $job.hook | default "PreSync" }}
+    argocd.argoproj.io/hook-delete-policy: {{ $job.hookDeletePolicy | default "BeforeHookCreation" }}
+    argocd.argoproj.io/sync-wave: {{ $job.syncWave | default "0" | quote }}
+spec:
+  backoffLimit: {{ $job.backoffLimit | default 0 }}
+  activeDeadlineSeconds: {{ required (printf "'%s': activeDeadlineSeconds e obrigatorio" $name) $job.activeDeadlineSeconds }}
+  {{- with $job.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "kos.labels" $ctx | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "kos.name" $ctx }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $job.terminationGracePeriodSeconds | default 30 }}
+      securityContext:
+        {{- include "kos.podSecurityContext" $ctx | trim | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "kos.image" (dict "root" $ "name" $name "image" $job.image) | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            {{- toYaml (required (printf "'%s': command e obrigatorio" $name) $job.command) | nindent 12 }}
+          {{- with $job.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            {{- include "kos.env" (dict "svc" $job) | trim | nindent 12 }}
+            - name: GIT_SHA
+              value: {{ include "kos.gitSha" (dict "root" $ "name" $name "image" $job.image) | quote }}
+          {{- if $job.secrets }}
+          envFrom:
+            - secretRef:
+                name: {{ include "kos.envSecretName" $ctx }}
+          {{- end }}
+          resources:
+            {{- include "kos.resources" $ctx | trim | nindent 12 }}
+          securityContext:
+            {{- include "kos.containerSecurityContext" $ctx | trim | nindent 12 }}
+          {{- if $job.tmpDir }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+      {{- if $job.tmpDir }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ $job.tmpDirSizeLimit | default "64Mi" }}
+      {{- end }}
+{{- end }}
+{{- end }}

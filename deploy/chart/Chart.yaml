@@ -1,0 +1,12 @@
+apiVersion: v2
+name: kos-components
+description: >-
+  Khal OS — surface `kos`, grupo `components` (usage-component: API de leitura,
+  worker de ingestao de traces, scheduler de fechamento, Job de migracao e
+  CronJob de backup). Chart GENERICO do Padrao self-service-deploy: tudo o que
+  varia entre servicos e ambientes vive em `deploy/values*.yaml`, nunca aqui.
+type: application
+version: 0.1.0
+# appVersion e informativo (aparece em app.kubernetes.io/version). A identidade
+# REAL do binario e o digest + gitSha pinados em deploy/values-<env>.yaml.
+appVersion: "0.1.0"

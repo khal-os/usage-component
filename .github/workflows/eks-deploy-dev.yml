@@ -1,0 +1,353 @@
+# LANE 1/3 — dev: a UNICA lane que builda imagem.
+# Ela produz os digests; homolog e main promovem exatamente os mesmos digests,
+# sem rebuild. E isso que garante que o binario homologado e bit-a-bit o que vai
+# para producao.
+#
+# TRES IMAGENS, UM PIN. O repo publica usage-module, usage-connector e
+# usage-db-backup, e cinco workloads as compartilham (api, billing-close-
+# scheduler e o Job de migracao rodam o MESMO usage-module). A matrix e sobre
+# IMAGENS — construir por servico publicaria tres digests diferentes do mesmo
+# commit (npm ci nao e bit-a-bit reprodutivel) e "qual binario e o commit X"
+# deixaria de ter resposta unica. O pin dos tres entra num commit so: pinar em
+# tres commits abriria uma janela com a api nova falando com o schema velho.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# O QUE O OWNER PRECISA CADASTRAR (nenhum valor real aparece neste arquivo)
+#
+#   Variables
+#     KOS_EKS_PUBLISH_ENABLED   literal 'true' para a lane sair do seco. Enquanto
+#                               nao existir, o job e pulado — repo recem-migrado
+#                               nao publica imagem sem querer.
+#     ARGOCD_SERVER             (opcional) base URL da API do Argo CD.
+#   Secrets
+#     ARGOCD_CI_TOKEN           JWT da conta ci-kos-verify (read-only no
+#                               AppProject kos-hapvida). Sem ele o gate REPROVA:
+#                               nao existe caminho de skip.
+#
+#   Infra que precisa existir ANTES do primeiro run:
+#     · ECR 278522730053: kos/usage-module, kos/usage-connector, kos/usage-db-backup
+#       (IMMUTABLE, scanOnPush, repository policy de pull para 701 e 652)
+#     · role OIDC arn:aws:iam::278522730053:role/gha-kos-usage-component-ecr-push
+#     · Application hv-kos-components-dev aplicada no Argo
+#
+#   Regra de branch: a lane FAZ PUSH nesta branch (e assim que o deploy
+#   acontece). Se a branch for protegida, inclua o GitHub Actions em quem pode
+#   empurrar — senao a lane morre no push depois de ja ter mexido no registry.
+# ─────────────────────────────────────────────────────────────────────────────
+name: eks-deploy-dev
+
+on:
+  push:
+    branches: [eks/dev]
+    # ANTI-LACO: o commit de pin desta lane toca EXATAMENTE este arquivo
+    # (deploy/gitops-pin.sh faz `git add` do caminho unico), entao ele nao
+    # re-dispara a lane. Ignoramos so o values DESTA lane, nunca
+    # `deploy/values-*.yaml`: um push que trouxesse apenas values de outro
+    # ambiente seria engolido pelo padrao largo.
+    paths-ignore:
+      - 'deploy/values-dev.yaml'
+  # Caminho de recuperacao E o caminho do PRIMEIRO build: enquanto nenhum digest
+  # foi pinado, `helm template` falha fechado no placeholder e a Application do
+  # Argo nao renderiza. Sem dispatch seria preciso inventar um commit vazio.
+  workflow_dispatch:
+
+concurrency:
+  group: eks-deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: sa-east-1
+  # Conta de REGISTRY do produto (core-services-prod). As contas de workload
+  # (701 dev/hml, 652 prod) so PUXAM, por repository policy read-only — nenhuma
+  # delas tem caminho de escrita vindo de CI.
+  AWS_ROLE_ARN: arn:aws:iam::278522730053:role/gha-kos-usage-component-ecr-push
+  ECR_REGISTRY: 278522730053.dkr.ecr.sa-east-1.amazonaws.com
+  ARGOCD_APP: hv-kos-components-dev
+  CHART_ENV: dev
+
+jobs:
+  # ── 1. O QUE CONSTRUIR ──────────────────────────────────────────────────────
+  # A lista sai de deploy/values.yaml (unica fonte). Uma imagem nova entra no
+  # deploy criando UMA entrada em `images:` — nao editando quatro workflows.
+  resolver:
+    name: resolver a matrix de imagens
+    runs-on: ubuntu-latest
+    if: vars.KOS_EKS_PUBLISH_ENABLED == 'true'
+    outputs:
+      matrix: ${{ steps.lista.outputs.matrix }}
+    steps:
+      - name: A ref e a branch eks/dev?
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" != "eks/dev" ]; then
+            echo "::error::esta lane so builda a partir de eks/dev (recebi '${GITHUB_REF_NAME}'). Promocao para hml/prod e re-pin do MESMO digest, nunca build novo."
+            exit 1
+          fi
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # ── HOLD: freeze manual, ANTES de qualquer mutacao externa (CONTRATO §6) ─
+      # deploy/gitops-pin.sh tambem le o HOLD — mas ele so roda no FIM, depois do
+      # build e do push (lane dev) e depois do retag no ECR (lanes de promocao).
+      # Um freeze lido so no fim ja deixou tag nova no registry: o repositorio e
+      # IMMUTABLE, entao aquilo nao se desfaz. A checagem cara e a primeira; a do
+      # gitops-pin fica como cinto, para quem o chama fora da lane.
+      - name: HOLD ativo? (freeze declarado no repo)
+        env:
+          HOLD_ENV: ${{ env.CHART_ENV }}
+        run: |
+          set -euo pipefail
+          for HOLD in deploy/HOLD "deploy/HOLD-${HOLD_ENV}"; do
+            if [ -f "$HOLD" ]; then
+              echo "::error::HOLD ativo em ${HOLD} — a lane para AQUI, antes de build, push, retag ou pin."
+              sed -e 's/^/  /' "$HOLD"
+              exit 1
+            fi
+          done
+          echo "  ok: nenhum HOLD ativo para ${HOLD_ENV}"
+
+      - name: garantir PyYAML
+        run: python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check --quiet 'pyyaml==6.0.2'
+      - id: lista
+        run: |
+          set -euo pipefail
+          MATRIX="$(deploy/services.sh matrix)"
+          echo "$MATRIX" | python3 -m json.tool
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+
+  # ── 2. CONSTRUIR E PROVAR O DIGEST ─────────────────────────────────────────
+  build:
+    name: build ${{ matrix.name }}
+    needs: resolver
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # OIDC para assumir a role de push no ECR
+    strategy:
+      # fail-fast desligado: se uma imagem quebra, ainda queremos ver se as
+      # outras quebram tambem — tres diagnosticos num run, nao um por run.
+      fail-fast: false
+      matrix: ${{ fromJson(needs.resolver.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-kos-usage-dev-${{ github.run_id }}
+
+      - name: Login no ECR
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      # ── ESQUEMA DE TAG DA ESTEIRA (contrato unico, CONTRATO §2) ─────────────
+      #   dev  (esta lane, build)  dev-<sha40>
+      #   hml  (deploy-homolog)    hml-<sha40 do commit de dev que gerou o digest)
+      #   prod (deploy-main)       prod-<sha40 do commit de homolog que promoveu)
+      # Os tres prefixos — e so estes — sao os que a lifecycle policy do ECR
+      # conhece. Um prefixo que a policy nao reserva e o mesmo que nao taguear.
+      #
+      # `dev-<sha>` e nao `dev-<sha>-<run_id>`: o passo seguinte checa a tag
+      # ANTES de construir e reusa o digest publicado, entao nao ha segundo push
+      # e nao ha colisao com o repositorio IMMUTABLE. O esquema com run_id seria
+      # PIOR: cada re-run publicaria um digest DIFERENTE para o mesmo commit.
+      - name: Identidade do build
+        id: alvo
+        env:
+          IMAGE_NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          {
+            echo "repository=kos/${IMAGE_NAME}"
+            echo "tag=dev-${GITHUB_SHA}"
+            echo "image=${ECR_REGISTRY}/kos/${IMAGE_NAME}:dev-${GITHUB_SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: A tag ja existe no ECR? (idempotencia)
+        id: existente
+        env:
+          REPOSITORY: ${{ steps.alvo.outputs.repository }}
+          TAG: ${{ steps.alvo.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Repositorio IMMUTABLE: republicar `dev-<sha>` devolveria
+          # ImageTagAlreadyExistsException e quebraria um re-run legitimo (mesmo
+          # commit, mesma tag). Reusar o digest ja publicado e o comportamento
+          # certo — o binario que dev validou e AQUELE, nao um rebuild
+          # "equivalente".
+          DIGEST="$(aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids "imageTag=${TAG}" \
+            --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+          if [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "= ${REPOSITORY}:${TAG} ja existe em ${DIGEST} — nao rebuilda"
+            echo "existe=true"      >> "$GITHUB_OUTPUT"
+            echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          else
+            echo "existe=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # SEM `if`: quando a imagem e reusada o build nao roda, mas o passo de
+      # prova ainda usa `imagetools inspect` — e ele precisa do buildx.
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+
+      - name: Build e push
+        id: push
+        if: steps.existente.outputs.existe != 'true'
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.alvo.outputs.image }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          # UM unico manifest, single-platform, SEM atestacao. Com
+          # `provenance: true` (default moderno do buildx) o que fica tagueado e
+          # um INDICE e os manifests filhos ficam untagged — e a regra de
+          # lifecycle de untagged do ECR nao aceita tagPrefixList, entao ela
+          # varre o repositorio inteiro e apaga os filhos. A imagem tagueada
+          # passa a apontar para nada, mesmo com repo IMMUTABLE.
+          #
+          # amd64 e obrigatorio aqui: os nodegroups Hapvida sao m6i (x86) nos
+          # dois clusters, e as imagens do POC eram arm64.
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+
+      - name: Resolver e PROVAR o digest no registry
+        id: digest
+        env:
+          DO_PUSH: ${{ steps.push.outputs.digest }}
+          DO_ECR: ${{ steps.existente.outputs.digest }}
+          IMAGE_NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          DIGEST="${DO_PUSH:-$DO_ECR}"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || { echo "::error::digest fora do formato sha256:<64 hex>: '${DIGEST}'"; exit 1; }
+
+          # A existencia e provada LENDO o registry por digest, ja autenticado.
+          # Um 401 nao prova nada, e o output do build-push tambem nao: ele e o
+          # que o cliente calculou, nao o que o registry aceitou.
+          NOME_DIGEST="${ECR_REGISTRY}/kos/${IMAGE_NAME}@${DIGEST}"
+          MANIFEST="$(docker buildx imagetools inspect "$NOME_DIGEST" --format '{{json .Manifest}}')"
+          echo "$MANIFEST" | jq .
+          VISTO="$(jq -r '.digest' <<<"$MANIFEST")"
+          [ "$VISTO" = "$DIGEST" ] \
+            || { echo "::error::o registry devolveu ${VISTO} para ${NOME_DIGEST}"; exit 1; }
+
+          # Confirma que nao viramos manifest list apesar de provenance:false.
+          MEDIA="$(jq -r '.mediaType' <<<"$MANIFEST")"
+          case "$MEDIA" in
+            *manifest.v2+json|*image.manifest.v1+json) ;;
+            *) echo "::error::mediaType='${MEDIA}' — isso e um indice/manifest list. Os manifests filhos ficam untagged e a lifecycle do ECR os apaga. Rebuilde com provenance:false, sbom:false e uma unica plataforma."; exit 1 ;;
+          esac
+
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          printf '%s' "$DIGEST" > "digest-${IMAGE_NAME}.txt"
+
+      # O pin precisa dos TRES digests juntos; matrix job nao agrega outputs.
+      # Um artifact por imagem e o canal.
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: digest-${{ matrix.name }}
+          path: digest-${{ matrix.name }}.txt
+          retention-days: 7
+          if-no-files-found: error
+
+  # ── 3. PINAR O BLOCO INTEIRO E MEDIR O RESULTADO ───────────────────────────
+  pin:
+    name: pin do bloco → gate do Argo
+    needs: [resolver, build]
+    runs-on: ubuntu-latest
+    permissions:
+      # `write`, nao `read`: o gitops-pin COMMITA o values e faz push nesta
+      # branch — e assim que o deploy acontece (o Argo le daqui). Com `read` a
+      # lane vai ate o fim e morre no push, depois de o registry ja ter mudado.
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # O gitops-pin faz rebase-and-retry contra origin/eks/dev (clone raso
+          # nao tem base) e o gate le o chart do commit de pin.
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
+        with:
+          version: v3.16.3
+
+      - name: garantir PyYAML
+        run: python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check --quiet 'pyyaml==6.0.2'
+
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Montar o bloco imagem → digest
+        id: bloco
+        env:
+          MATRIX: ${{ needs.resolver.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          BLOCO='{}'
+          for NOME in $(jq -r '.include[].name' <<<"$MATRIX"); do
+            ARQ="digests/digest-${NOME}.txt"
+            [ -f "$ARQ" ] || { echo "::error::faltou o digest de ${NOME} (${ARQ}) — o build daquela imagem nao chegou ao fim"; exit 1; }
+            DIGEST="$(cat "$ARQ")"
+            [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::digest invalido para ${NOME}: '${DIGEST}'"; exit 1; }
+            BLOCO="$(jq --arg k "$NOME" --arg v "$DIGEST" '. + {($k): $v}' <<<"$BLOCO")"
+          done
+          echo "$BLOCO" | jq .
+          echo "json=$(jq -c . <<<"$BLOCO")" >> "$GITHUB_OUTPUT"
+
+      - name: Instante do push (para o gate medir reconciledAt)
+        id: relogio
+        run: echo "epoch=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Pinar em deploy/values-dev.yaml
+        id: pin
+        env:
+          BLOCO_JSON: ${{ steps.bloco.outputs.json }}
+        run: deploy/gitops-pin.sh dev "$BLOCO_JSON" "$GITHUB_SHA"
+
+      # ── O GATE ─────────────────────────────────────────────────────────────
+      # Sem ramo de skip, sem `exit 0` por falta de credencial. Se ele nao
+      # consegue medir, ele REPROVA: "pin commitado" e muito menos do que
+      # "deploy feito".
+      - name: Gate — a Application convergiu para estes digests?
+        env:
+          ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER }}
+          ARGOCD_CI_TOKEN: ${{ secrets.ARGOCD_CI_TOKEN }}
+          ARGOCD_VERIFY_REQUIRE_LIVE: '1'
+          ARGOCD_VERIFY_DEADLINE_SECONDS: '900'
+          EXPECTED_IMAGE_PREFIX: ${{ env.ECR_REGISTRY }}/kos/
+          PIN_SHA: ${{ steps.pin.outputs.pin_sha }}
+          EPOCH: ${{ steps.relogio.outputs.epoch }}
+        run: deploy/verify-argo.sh "$ARGOCD_APP" "$CHART_ENV" "$PIN_SHA" "$EPOCH"
+
+      - name: Evidencia
+        if: always()
+        env:
+          BLOCO_JSON: ${{ steps.bloco.outputs.json }}
+          PIN: ${{ steps.pin.outputs.pin_sha }}
+        run: |
+          {
+            echo "### eks-deploy-dev"
+            echo
+            echo "| campo | valor |"
+            echo "| --- | --- |"
+            echo "| commit de origem | \`${GITHUB_SHA}\` |"
+            echo "| tags publicadas | \`dev-${GITHUB_SHA}\` (uma por imagem) |"
+            echo "| commit de pin | \`${PIN:-<nao pinado>}\` |"
+            echo "| Application | \`${ARGOCD_APP}\` |"
+            echo
+            echo "Bloco pinado:"
+            echo '```json'
+            echo "${BLOCO_JSON:-{}}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

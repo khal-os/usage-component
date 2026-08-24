@@ -1,0 +1,8 @@
+# INVALIDA: servico sem `health` (logo sem readiness).
+services:
+  rogue:
+    enabled: true
+    image:
+      name: usage-module
+      repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-module
+    replicas: 1

@@ -1,0 +1,11 @@
+kos-components {{ .Chart.Version }} — namespace {{ include "kos.namespace" . }}
+
+Servicos habilitados:
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+  · {{ $name }}  ({{ $svc.replicas }}x, {{ $svc.strategy | default "RollingUpdate" }})  {{ include "kos.image" (dict "root" $ "name" $name "image" $svc.image) }}
+{{- end }}
+{{- end }}
+
+Rollback = `git revert` do commit de pin em deploy/values-<env>.yaml.
+NUNCA `helm rollback` / `kubectl rollout undo` (o selfHeal do Argo desfaz).

@@ -1,0 +1,13 @@
+# Fixture: pins VALIDOS (digests inventados, formato real). Usado pelo CI para
+# provar que o chart renderiza — os values-<env>.yaml do repo carregam o
+# placeholder de 64 zeros e falham fechado de proposito ate a lane dev rodar.
+pins:
+  usage-module:
+    digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    gitSha: "1111111111111111111111111111111111111111"
+  usage-connector:
+    digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    gitSha: "1111111111111111111111111111111111111111"
+  usage-db-backup:
+    digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    gitSha: "1111111111111111111111111111111111111111"

@@ -1,0 +1,55 @@
+{{- /*
+Um Ingress por host, todos no MESMO IngressGroup do ambiente (um ALB por
+ambiente — CONTRATO §3, regra 6 da skill gitops-deploy).
+
+Duas coisas que ja quebraram na frota e por isso estao aqui, sempre:
+  · `listen-ports` + `ssl-redirect` em CADA Ingress do grupo. Cada Ingress so
+    anexa regra nos listeners que declara; sem isso o host novo responde no :80
+    e da 404 no :443.
+  · SEM `certificate-arn`. O cert do grupo entra por append CSV no Ingress-FONTE
+    do grupo (fase de borda). Declarar um cert aqui criaria um segundo dono do
+    listener e a briga silenciosa que vem junto.
+O healthcheck da borda aponta para um path que responde 200 sem auth — divergir
+do criterio de readiness do pod so troca a origem do 502 pela do 503.
+*/ -}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled ($svc.ingress).enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+{{- $ing := $svc.ingress }}
+{{- $d := $.Values.ingressDefaults }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "kos.name" $ctx }}
+  namespace: {{ include "kos.namespace" $ }}
+  labels:
+    {{- include "kos.labels" $ctx | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/group.name: {{ required (printf "'%s': ingressDefaults.groupName e obrigatorio (IngressGroup do ambiente)" $name) $d.groupName | quote }}
+    alb.ingress.kubernetes.io/scheme: {{ $d.scheme | quote }}
+    alb.ingress.kubernetes.io/target-type: {{ $d.targetType | quote }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/healthcheck-path: {{ $ing.healthcheckPath | default ($svc.health.readiness).path | required (printf "'%s': ingress.healthcheckPath (ou readiness http) e obrigatorio" $name) | quote }}
+    {{- with $ing.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ $d.className }}
+  rules:
+    - host: {{ required (printf "'%s': ingress.host e obrigatorio quando ingress.enabled=true" $name) $ing.host | quote }}
+      http:
+        paths:
+          - path: {{ $ing.path | default $d.path }}
+            pathType: {{ $ing.pathType | default $d.pathType }}
+            backend:
+              service:
+                name: {{ include "kos.name" $ctx }}
+                port:
+                  number: {{ $svc.servicePort | default $svc.port }}
+{{- end }}
+{{- end }}

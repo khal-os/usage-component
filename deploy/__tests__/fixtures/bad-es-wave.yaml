@@ -1,0 +1,9 @@
+# FIXTURE INVALIDA (render). O ExternalSecret do Job de migracao na MESMA wave do
+# Job: o Argo criaria os dois juntos e o pod do hook subiria com `envFrom` de um
+# Secret que ainda nao existe — CreateContainerConfigError ate o
+# activeDeadlineSeconds, fase PreSync reprovada, sync inteiro parado.
+# O chart tem de recusar isso ANTES do cluster ver qualquer coisa.
+jobs:
+  migrations:
+    syncWave: 0
+    esSyncWave: 0
