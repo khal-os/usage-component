@@ -47,12 +47,17 @@ services:
     # + PDB maxUnavailable 1 mantem a API no ar durante rollout e drain.
     replicas: 2
     ingress:
-      host: api.hapvida.khal.ai
+      # HOST DE VALIDACAO (ate o cutover): a POC segue dona de api.hapvida e
+      # auth.hapvida; o prod novo valida em paralelo pela familia `-prod`,
+      # casada com o values-prod do khal-platform. No cutover, os tres valores
+      # abaixo (host, KHAL_AUTH_URL, primeira origem do CORS) trocam pro nome
+      # final — hapvida vs martechos, decisao pendente do owner.
+      host: api-prod.hapvida.khal.ai
     envOverride:
       ENVIRONMENT: production
       MONGO_USAGE_DB_NAME: usage_db
-      KHAL_AUTH_URL: https://auth.hapvida.khal.ai
-      CORS_ALLOWED_ORIGINS: https://hapvida.khal.ai,https://*.hapvida.khal.ai
+      KHAL_AUTH_URL: https://auth-prod.hapvida.khal.ai
+      CORS_ALLOWED_ORIGINS: https://hapvida-prod.khal.ai,https://*.hapvida.khal.ai
 
   trace-ingestion-worker:
     envOverride:
