@@ -32,13 +32,13 @@ extraEgress:
 pins:
   usage-module:
     digest: "sha256:66a7bc0b498cd775884e9ae7abda0618b18379616f597d5630572854d97cd81f"
-    gitSha: "c1509a4c6c394d98c9556dae8e241e194eb7726c"
+    gitSha: "31787732f99640a01e8092b37255f6e3a6a6b59a"
   usage-connector:
     digest: "sha256:539beb3a3671b409a7ca0d08c58c0d3f13145edc85a2050007034b2a79938553"
-    gitSha: "c1509a4c6c394d98c9556dae8e241e194eb7726c"
+    gitSha: "31787732f99640a01e8092b37255f6e3a6a6b59a"
   usage-db-backup:
     digest: "sha256:cfe9d3938313f72cdbb6677e4f13772cdfa1874c530cb744b8f96b031635eb52"
-    gitSha: "c1509a4c6c394d98c9556dae8e241e194eb7726c"
+    gitSha: "31787732f99640a01e8092b37255f6e3a6a6b59a"
 
 services:
   api:
