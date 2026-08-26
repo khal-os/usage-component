@@ -55,6 +55,15 @@ describe('environment-setup', () => {
 
       expect(environment.mongoDbAtlas).toBeUndefined();
     });
+
+    it("MUST treat '' (compose `${MONGO_DB_ATLAS:-}`) exactly like unset", async () => {
+      // A fresh client env never writes the knob; the enum without the ''
+      // preprocess rejected the forwarded empty string and crash-looped
+      // the api container on a clean deploy-demo-client.sh run.
+      const environment = await loadEnvironment({ MONGO_DB_ATLAS: '' });
+
+      expect(environment.mongoDbAtlas).toBeUndefined();
+    });
   });
 
   describe('KHAL_* (session auth surface, ADR-103 naming)', () => {

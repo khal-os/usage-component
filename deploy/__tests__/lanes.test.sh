@@ -138,11 +138,18 @@ done
 
 titulo "CONTRATO §0.1 — nada da esteira atual foi tocado"
 BASE="${KOS_BASE_REF:-origin/main}"
-# O guard compara a arvore INTEIRA contra main e exige que tudo desta stream
-# seja arquivo NOVO. Isso so significa alguma coisa quando o que esta sendo
-# medido E esta stream — ou seja, nas branches `eks/**`. Num PR da esteira ECS o
-# mesmo diff acusaria como "modificado" um arquivo que esta stream nunca tocou.
-# Fora de eks/** o guard nao aprova nada: ele diz, em voz alta, que NAO mediu.
+# O guard mede SO o lado da stream: diff de tres pontos (merge-base..HEAD), para
+# que a evolucao independente do main (que continua entregando em ECS) nunca
+# apareca aqui como falso positivo — depois do PR #58 as duas linhas divergem de
+# forma legitima e permanente ate o cutover: o pin da lane reescreve
+# deploy/values-<env>.yaml, o chart itera em eks/dev, e o time de app ja abre PR
+# com base eks/dev (#62). O que o guard protege e o BLOCKLIST operacional da
+# esteira ECS: taskdefs, tenants, scripts, langwatch, Caddyfile e os workflows
+# nao-eks. QUALQUER aparicao deles (A, M ou D) vinda do lado eks/** e violacao
+# do §0.1 — essa esteira so muda via main.
+# Isso so significa alguma coisa quando o que esta sendo medido E esta stream —
+# ou seja, nas branches `eks/**`. Fora de eks/** o guard nao aprova nada: ele
+# diz, em voz alta, que NAO mediu.
 REF="${KOS_REF_NAME:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}}}"
 if [[ "$REF" != eks/* ]]; then
   ok "NAO MEDIDO nesta ref ('${REF:-<desconhecida>}' nao e eks/**) — o guard do §0.1 mede as branches da stream; a esteira ECS tem os proprios checks"
@@ -151,8 +158,10 @@ else
     git fetch --no-tags --quiet origin main 2>/dev/null || true
   fi
   if git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
-    TOCADOS="$(git diff --name-status "$BASE" -- . | awk '$1 != "A" { print $1 " " $2 }')"
-    verifica "nenhum arquivo pre-existente modificado ou removido" "" "$TOCADOS"
+    TOCADOS="$(git diff --name-status "${BASE}...HEAD" -- \
+        deploy/taskdefs deploy/tenants deploy/scripts deploy/langwatch deploy/Caddyfile .github/workflows \
+      | awk '$2 !~ /^\.github\/workflows\/eks-/ { print $1 " " $2 }')"
+    verifica "nenhum arquivo da esteira ECS tocado deste lado (merge-base..HEAD)" "" "$TOCADOS"
   else
     falha "nao consegui resolver ${BASE} — este guard NAO foi medido (defina KOS_BASE_REF ou traga a base)"
   fi

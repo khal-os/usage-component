@@ -1,5 +1,10 @@
 # 🚀 VM Deploy Runbook — observability module on real infra
 
+> **HISTORICAL — superseded by [RUNBOOK-AWS.md](RUNBOOK-AWS.md)** for
+> production (decision 140). Kept as the record of the retired Hetzner PoC;
+> do not onboard new tenants with this flow. Paths and env names below are
+> frozen as they were (e.g. `usage-billing-component`, pre-rename).
+
 One client of this component on a single cloud VM: the same compose stack
 and deploy scripts as a workstation, plus **caddy** on the host giving the
 two public surfaces TLS. Everything else stays loopback-bound — that, not

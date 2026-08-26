@@ -10,13 +10,23 @@ import { z } from 'zod';
  * Both packages now spread these into their own schema.
  */
 export const mongoEnvSchemaShape = {
-  MONGO_DB_PORT: z
-    .string()
-    .regex(/^\d+$/, 'MONGO_DB_PORT must be a valid integer string')
-    .optional(),
+  // '' means UNSET (compose forwards `${MONGO_DB_PORT:-…}`), same rule as
+  // every optional knob — see parse-log-env. Without the preprocess the
+  // validated optionals rejected the compose-forwarded empty string and
+  // crash-looped a fresh client deploy that never set the knob.
+  MONGO_DB_PORT: z.preprocess(
+    (value) => value || undefined,
+    z
+      .string()
+      .regex(/^\d+$/, 'MONGO_DB_PORT must be a valid integer string')
+      .optional(),
+  ),
   // env vars are always strings — a boolean here would reject every set
   // value and crash the boot; the transform below maps to boolean.
-  MONGO_DB_ATLAS: z.enum(['true', 'false']).optional(),
+  MONGO_DB_ATLAS: z.preprocess(
+    (value) => value || undefined,
+    z.enum(['true', 'false']).optional(),
+  ),
   MONGO_DB_HOST: z.string().optional(),
   // Decision 139: REQUIRED, declared never inferred — the old MONGO_DB_NAME
   // silently defaulted to CLIENT_NAME in compose; in a cluster-per-client
