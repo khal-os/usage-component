@@ -247,8 +247,11 @@ git config user.email "khal-release-bot@namastex.ai"
 # `git add` do arquivo unico, nao `-A`: o commit de pin PRECISA tocar so o values
 # do ambiente, senao o `paths-ignore` do workflow nao vale e a lane se re-chama.
 git add -- "$VALUES"
-RESUMO="$(jq -r '[to_entries[] | "\(.key)@\(.value[7:19])"] | join(" ")' <<<"$BLOCO")"
-git commit -q -m "chore(gitops): pin ${AMBIENTE} — ${RESUMO} (src ${SHA})"
+# O detalhe dos digests vai no CORPO: o header com 3 imagens estoura o
+# header-max-length do commitlint (o linter ignora pins, mas o header curto
+# mantem `git log --oneline` legivel de qualquer forma).
+RESUMO="$(jq -r '[to_entries[] | "\(.key)@\(.value[7:19])"] | join("\n")' <<<"$BLOCO")"
+git commit -q -m "chore(gitops): pin ${AMBIENTE} (src ${SHA})" -m "${RESUMO}"
 
 BRANCH="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
 
