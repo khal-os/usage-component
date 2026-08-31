@@ -82,6 +82,12 @@ jobs:
 
 cronjobs:
   backup:
+    # DESLIGADO ate a janela de corte (wish hapvida-prod-cutover, Decisao 9 do
+    # design): o CronJob nasce ativo em 0 7 America/Sao_Paulo — o MESMO minuto e
+    # fuso do EventBridge Scheduler da conta 504, que segue ENABLED. Dois
+    # mongodump simultaneos no mesmo Atlas de producao. Religar SOMENTE na
+    # janela, DEPOIS de desabilitar o scheduler da origem.
+    enabled: false
     serviceAccount:
       irsaRoleArn: arn:aws:iam::652197205677:role/hv-kos-usage-backup-prod
     envOverride:
