@@ -1,0 +1,15 @@
+# Dated exceptions to the Trivy gates in docker.yml (decision 173).
+# Every entry needs: the CVE, why it is unactionable HERE, and an exp: date
+# that forces the revisit — when it fires, CI goes red again on purpose.
+#
+# CVE-2026-56854 (GO-2026-6303): golang.org/x/crypto/ssh — "source-address"
+# critical option not enforced for non-public-key auth callbacks. CRITICAL
+# in all 8 Go binaries of mongodb-database-tools 100.18.0 (x/crypto v0.54.0,
+# fixed in 0.55.0). Unactionable: 100.18.0 is the latest tools release and
+# mongodb/mongo-tools master still pins v0.54.0 — no released artifact
+# ships the fix (checked 2026-09-02). Unreachable: the flaw is in the ssh
+# SERVER auth path; the mongo tools run no ssh server.
+# On expiry: if a tools release with x/crypto >= 0.55.0 exists, bump the
+# .deb in docker/usage-db-backup.Dockerfile and delete this line
+# (decision 170); if not, extend with a new decision-log row.
+CVE-2026-56854 exp:2026-11-01
