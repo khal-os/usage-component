@@ -453,19 +453,23 @@ tags das actions nos SHAs de 40 hex que os workflows pinam.
 ## 5. PENDENTES
 
 **PENDENTE-1 — health contract do modulo (`/healthz`, `/readyz`, `/api/version`).**
-Nao implementado. O CONTRATO §5 permite "usar o que existe e registrar
-follow-up", e implementar exigiria editar
-`packages/module/src/main/server/app.ts` (registro das rotas), que e arquivo da
-esteira ATUAL — proibido nesta fase (§0.1). Efeito hoje: o readiness da api nao
-toca o Mongo, entao um pod com banco inacessivel entra no Service e devolve erro
-no primeiro request em vez de ficar fora do balanceamento.
-*Proposta para quando a janela abrir*: arquivo novo
-`packages/module/src/main/server/routes/health.ts` exportando um `Router` com
-`/healthz` (200 seco), `/readyz` (`db.admin().ping()` com timeout curto,
-fail-closed) e `/api/version` (`{ gitSha: process.env.GIT_SHA }` — o chart ja
-injeta `GIT_SHA` em todo workload), mais UMA linha de `app.use(...)`. Depois:
-trocar `health.readiness.path` e `ingress.healthcheckPath` em
-`deploy/values.yaml` e preencher `health.version`.
+PARCIAL (01/09/2026, decisao 172): `GET /health` existe e e ABERTO — a
+convencao da plataforma (khal-platform `packages/http-kit`, `healthRoute`), o
+caminho que o manifesto do modulo declara em `connection.health` e que o
+Catalog Console sonda do navegador. Vive em
+`packages/module/src/main/server/routes/health.ts`, registrado DEPOIS do CORS
+(o Console precisa ler o status cross-origin) e ANTES do gate de sessao —
+prova de processo, nao toca o Mongo. Segue pendente:
+(1) trocar `health.liveness.path`, `health.readiness.path` e
+`ingress.healthcheckPath` para `/health` num PR de values SEPARADO, depois que
+a imagem com a rota estiver pinada no ambiente — flipar no mesmo PR abre a
+janela merge→pin em que o Argo sincroniza o chart novo com o pin velho e o
+probe aponta para rota que a imagem ainda nao tem;
+(2) `/readyz` honesto (`db.admin().ping()` com timeout curto, fail-closed) —
+o readiness da api segue sem tocar o Mongo, entao um pod com banco inacessivel
+continua entrando no Service;
+(3) `/api/version` (`{ gitSha: process.env.GIT_SHA }` — o chart ja injeta
+`GIT_SHA` em todo workload) e preencher `health.version`.
 
 **PENDENTE-2 — `LANGWATCH_PROJECT_ID` via SSM ParameterStore.**
 O CONTRATO §4 lista `SSM /hapvida/<env>/kos/components/langwatch-project-id`, mas

@@ -139,12 +139,19 @@ services:
     # readOnlyRootFilesystem + emptyDir em /tmp.
     tmpDir: true
     health:
-      # ⚠ O modulo AINDA NAO tem /healthz, /readyz nem /api/version (CONTRATO §5
-      # permite usar o que existe e registrar follow-up — ver PENDENTE-1 no
-      # README-STREAM). Enquanto isso:
+      # ⚠ O modulo agora TEM `GET /health` — aberto por convencao da plataforma
+      # (decisao 172: e o caminho que o manifesto declara em connection.health e
+      # que o Catalog Console sonda do navegador). /readyz honesto e /api/version
+      # continuam em aberto (CONTRATO §5 permite usar o que existe e registrar
+      # follow-up — ver PENDENTE-1 no README-STREAM). Os probes abaixo seguem
+      # em openapi.json DE PROPOSITO: trocar para /health e um PR de values
+      # SEPARADO, depois que a imagem com a rota estiver pinada no ambiente —
+      # flipar junto abre a janela merge→pin em que o chart ja sonda /health
+      # numa imagem que ainda nao tem a rota. Enquanto isso:
       #   liveness  = /api/v1/docs/openapi.json — prova de processo: e servido
       #               pelo express sem tocar o Mongo, entao uma queda do banco
-      #               NAO reinicia os pods em loop.
+      #               NAO reinicia os pods em loop (/health tem a mesma
+      #               propriedade quando o flip vier).
       #   readiness = o MESMO path. Isso e HONESTO sobre o que se sabe hoje:
       #               anunciar "ready" checando o banco exigiria /readyz, que nao
       #               existe. Um readiness que mente para MENOS (nao entra no

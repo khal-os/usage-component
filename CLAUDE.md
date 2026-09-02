@@ -138,7 +138,9 @@ locally against the JWKS at `${KHAL_AUTH_URL}/.well-known/jwks.json`
 `KHAL_TENANT`, required with the URL; `exp`
 checked) — except `/api/v1/docs*` and `openapi.json`, which stay open as
 the container healthcheck and integration surface (decision 103; OPTIONS
-preflight also bypasses). Identity-only, no scopes (ADR-95) — the module
+preflight also bypasses), and `GET /health`, open by platform convention
+(decision 172: liveness for orchestrators and the Catalog Console's
+browser probe — registered after CORS, before the gate). Identity-only, no scopes (ADR-95) — the module
 holds no scope logic, a platform invariant, not an omission. The retired
 names (the discovery quartet, the interim `BASIC_AUTH_*` gate of decision
 141) have NO aliases. Nothing configured → API open (PoC behavior, loud

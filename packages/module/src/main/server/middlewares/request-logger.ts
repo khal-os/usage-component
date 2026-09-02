@@ -3,9 +3,10 @@ import { Logger } from '@observability/core/common/logging/logger.js';
 
 export const makeRequestLoggerMiddleware = (logger: Logger) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    // Docs also serve as the container healthcheck — logging them would
-    // print a line every 15s per instance.
-    if (req.path.startsWith('/api/v1/docs')) {
+    // Docs serve as the container healthcheck and /health is the probe
+    // path (decision 172) — logging either would print a line every 15s
+    // per instance.
+    if (req.path.startsWith('/api/v1/docs') || req.path === '/health') {
       next();
       return;
     }
