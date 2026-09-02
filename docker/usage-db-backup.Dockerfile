@@ -7,6 +7,13 @@
 # The tools version is a security surface of its own: 100.15.0 shipped Go
 # binaries with 34 HIGH CVEs each (x/crypto, x/net…) that Trivy flagged on
 # every build; bump it when the scan lights up again.
+# It lit up again (2026-09): CVE-2026-56854 (x/crypto/ssh, CRITICAL) in all
+# 8 Go binaries of 100.18.0 — but 100.18.0 is the LATEST tools release and
+# upstream master still pins the vulnerable x/crypto v0.54.0, so there is
+# no version to bump to yet. The CVE sits in .trivyignore with an expiry
+# instead (decision 173): when a tools release ships x/crypto >= 0.55.0,
+# bump the .deb URL here (base and .deb move together, see above) and
+# delete the ignore line.
 FROM debian:13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates unzip \
