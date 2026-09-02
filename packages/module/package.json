@@ -30,10 +30,10 @@
     "@shelf/jest-mongodb": "^6.0.2",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.2.0",
-    "@types/supertest": "^7.2.0",
+    "@types/node": "^26.4.0",
+    "@types/supertest": "^7.2.1",
     "@types/swagger-ui-express": "^4.1.6",
-    "jest": "^30.4.2",
+    "jest": "^30.5.0",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.12",
     "tsx": "^4.23.12",
@@ -44,9 +44,9 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jose": "^5.10.0",
-    "mongodb": "^7.5.0",
+    "mongodb": "^7.6.0",
     "swagger-ui-express": "^5.0.1",
-    "zod": "^4.3.6"
+    "zod": "^4.5.1"
   },
   "private": true,
   "exports": {
