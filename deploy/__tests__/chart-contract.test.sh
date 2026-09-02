@@ -284,7 +284,7 @@ ING="$(awk '/^kind: Ingress$/{p=1} p; p&&/^---$/{exit}' <<<"$DEV")"
 contem "group.name do ambiente"  "alb.ingress.kubernetes.io/group.name: \"hapvida-dev\"" "$ING"
 contem "listen-ports HTTP+HTTPS" 'listen-ports: '"'"'[{"HTTP":80},{"HTTPS":443}]'"'"'' "$ING"
 contem "ssl-redirect 443"        'ssl-redirect: "443"' "$ING"
-contem "healthcheck-path real"   "healthcheck-path: \"/api/v1/docs/openapi.json\"" "$ING"
+contem "healthcheck-path real"   "healthcheck-path: \"/health\"" "$ING"
 nao_contem "sem certificate-arn" "certificate-arn" "$ING"
 contem "host de dev"             "host: \"api-dev.hapvida.khal.ai\"" "$ING"
 
