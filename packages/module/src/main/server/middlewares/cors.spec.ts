@@ -1,7 +1,11 @@
 import express from 'express';
 import request from 'supertest';
 import { corsMiddleware } from './index.js';
-import { originAllowedBy, parseAllowedOrigins } from './cors.js';
+import {
+  buildCorsMiddleware,
+  originAllowedBy,
+  parseAllowedOrigins,
+} from './cors.js';
 
 /**
  * Same-origin by design (audit D-1). The OLD suite pinned the wildcard —
@@ -111,5 +115,80 @@ describe('CORS allow-list rules', () => {
   it('treats an unset list as same-origin only', () => {
     expect(parseAllowedOrigins('')).toEqual([]);
     expect(allows('', 'https://anything.example.com')).toBe(false);
+  });
+});
+
+/**
+ * Preflights (decision 174): a browser request carrying Authorization —
+ * the Catalog Console's session-first health probe — sends OPTIONS first
+ * and the fetch spec requires a 2xx back. Before this, preflights fell
+ * through to the JSON 404 WITH the Allow-* headers present, so the
+ * cross-origin request died in the browser while everything LOOKED
+ * configured. The middleware now answers allowed origins itself; the
+ * audit D-1 posture is untouched — an unlisted origin still gets silence.
+ */
+describe('CORS preflight (decision 174)', () => {
+  const appWith = (list: string) => {
+    const preflightApp = express();
+    preflightApp.use(buildCorsMiddleware(list));
+    preflightApp.get('/probe', (_req, res) => {
+      res.json({});
+    });
+    return preflightApp;
+  };
+
+  it('MUST answer OPTIONS from an allowed origin 204 with the Allow-* trio, max-age and Vary: Origin', async () => {
+    const response = await request(appWith('https://console.example'))
+      .options('/probe')
+      .set('Origin', 'https://console.example')
+      .set('Access-Control-Request-Method', 'GET')
+      .set('Access-Control-Request-Headers', 'authorization')
+      .expect(204);
+
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://console.example',
+    );
+    expect(response.headers['access-control-allow-methods']).toBe('GET,POST');
+    expect(response.headers['access-control-allow-headers']).toBe(
+      'Content-Type, Authorization',
+    );
+    expect(response.headers['access-control-max-age']).toBe('600');
+    expect(response.headers.vary).toBe('Origin');
+  });
+
+  it('MUST NOT answer a preflight from an unlisted origin — it falls through with no Allow-* headers (audit D-1)', async () => {
+    // Falling through means express's own OPTIONS handling answers for the
+    // route (200 with Allow) — the proof is the status NOT being the
+    // middleware's 204 and the CORS headers being absent.
+    const response = await request(appWith('https://console.example'))
+      .options('/probe')
+      .set('Origin', 'https://evil.example')
+      .set('Access-Control-Request-Method', 'GET');
+
+    expect(response.status).not.toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect(response.headers['access-control-allow-methods']).toBeUndefined();
+    expect(response.headers['access-control-max-age']).toBeUndefined();
+  });
+
+  it('MUST leave non-OPTIONS requests to the router — the 204 is preflight-only', async () => {
+    const response = await request(appWith('https://console.example'))
+      .get('/probe')
+      .set('Origin', 'https://console.example')
+      .expect(200);
+
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://console.example',
+    );
+    expect(response.headers['access-control-max-age']).toBeUndefined();
+  });
+
+  it('MUST keep a non-CORS OPTIONS (no Origin) falling through to routing', async () => {
+    const response = await request(appWith('https://console.example')).options(
+      '/probe',
+    );
+
+    expect(response.status).not.toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 });

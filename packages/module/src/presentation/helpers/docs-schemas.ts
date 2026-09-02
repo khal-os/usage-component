@@ -13,6 +13,16 @@ export const apiErrorSchema = z.strictObject({
   msg: z.string(),
 });
 
+/**
+ * GET /health (decision 172) — the platform-wide liveness shape
+ * (khal-platform http-kit `healthRoute`): literals, not free strings, so
+ * the Catalog Console reads ONE contract across the fleet.
+ */
+export const healthResponseSchema = z.strictObject({
+  status: z.literal('ok'),
+  component: z.literal('usage-module'),
+});
+
 export const paginatedSchema = <Item extends z.ZodType>(item: Item) =>
   z.strictObject({
     page: z.number().int(),

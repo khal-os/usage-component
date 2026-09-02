@@ -76,7 +76,7 @@ deploy/
 
 | workload | kind | imagem | replicas | strategy | probes | grace | outros |
 |---|---|---|---|---|---|---|---|
-| `api` | Deployment | `usage-module` | 1 dev/hml, **2 prod** | RollingUpdate (surge 1 / unavail 0) | http `/api/v1/docs/openapi.json` | 30 s | Ingress `api-<env>.hapvida.khal.ai`, preset M, PDB em prod |
+| `api` | Deployment | `usage-module` | 1 dev/hml, **2 prod** | RollingUpdate (surge 1 / unavail 0) | http `/health` | 30 s | Ingress `api-<env>.hapvida.khal.ai`, preset M, PDB em prod |
 | `trace-ingestion-worker` | Deployment | `usage-connector` | 1 | **Recreate** | exec `stat /tmp/trace-ingestion-heartbeat` | 60 s | PDB `maxUnavailable: 1` (D11), egress 8123 -> `kos-langwatch-<hml\|prod>`; unicidade garantida por `Recreate` + `replicas: 1` + schema |
 | `billing-close-scheduler` | Deployment | `usage-module` | 1 | **Recreate** | exec `stat /tmp/billing-close-heartbeat` | 60 s | **`enabled: false`** por padrao (decisao 131 e opt-in) |
 | `migrations` | Job (hook **PreSync**, wave `0`) | `usage-module` | — | — | exit 0 | 30 s | `backoffLimit: 0`, `activeDeadlineSeconds: 600`; o ES dele e hook PreSync wave `-1` (D15) |
@@ -144,12 +144,16 @@ render nao-deterministico transforma todo diff do Argo em ruido.
 **D5 — `secrets: [app, mongo]` relativo + `secretsPathPrefix` por ambiente.**
 Mesma razao: evita repetir os tres paths completos em tres arquivos.
 
-**D6 — readiness da api = `/api/v1/docs/openapi.json`.**
-`/api/v1/docs` (sem barra) responde **301**; o kubelet aceita 3xx mas o ALB so
-aceita 200 por padrao, entao os dois lados apontam para o `openapi.json`, que
-responde 200 e continua ABERTO com o gate de sessao ligado. Liveness aponta para
-o mesmo path DE PROPOSITO: ele nao toca o Mongo, entao uma queda do banco nao
-reinicia os pods em laco. Ver PENDENTE-1.
+**D6 — probes e healthcheck da borda = `GET /health` (flip de 02/09/2026).**
+Nasceram em `/api/v1/docs/openapi.json` — o unico path que respondia 200 sem
+auth quando o modulo nao tinha rota de health ("usar o que existe", CONTRATO
+§5). Com a decisao 172 o `/health` existe, aberto por convencao da plataforma,
+e os tres knobs (liveness, readiness, `ingress.healthcheckPath`) apontam para
+ele — UMA grafia do health no stack inteiro (kubelet, ALB e o chip do Catalog
+Console). Continua prova de PROCESSO: nao toca o Mongo, entao queda do banco
+nao reinicia os pods em laco — o readiness honesto (`/readyz`) segue em
+PENDENTE-1. O flip foi um PR values-only DEPOIS da imagem pinada em dev;
+hml/prod recebem chart e re-pin juntos na promocao, preservando a ordem.
 
 **D7 — `CORS_ALLOWED_ORIGINS` = apex + wildcard de um label.**
 O parser do app (`packages/module/src/main/server/middlewares/cors.ts`) aceita
@@ -453,19 +457,21 @@ tags das actions nos SHAs de 40 hex que os workflows pinam.
 ## 5. PENDENTES
 
 **PENDENTE-1 — health contract do modulo (`/healthz`, `/readyz`, `/api/version`).**
-Nao implementado. O CONTRATO §5 permite "usar o que existe e registrar
-follow-up", e implementar exigiria editar
-`packages/module/src/main/server/app.ts` (registro das rotas), que e arquivo da
-esteira ATUAL — proibido nesta fase (§0.1). Efeito hoje: o readiness da api nao
-toca o Mongo, entao um pod com banco inacessivel entra no Service e devolve erro
-no primeiro request em vez de ficar fora do balanceamento.
-*Proposta para quando a janela abrir*: arquivo novo
-`packages/module/src/main/server/routes/health.ts` exportando um `Router` com
-`/healthz` (200 seco), `/readyz` (`db.admin().ping()` com timeout curto,
-fail-closed) e `/api/version` (`{ gitSha: process.env.GIT_SHA }` — o chart ja
-injeta `GIT_SHA` em todo workload), mais UMA linha de `app.use(...)`. Depois:
-trocar `health.readiness.path` e `ingress.healthcheckPath` em
-`deploy/values.yaml` e preencher `health.version`.
+PARCIAL (01/09/2026, decisao 172): `GET /health` existe e e ABERTO — a
+convencao da plataforma (khal-platform `packages/http-kit`, `healthRoute`), o
+caminho que o manifesto do modulo declara em `connection.health` e que o
+Catalog Console sonda do navegador. Vive em
+`packages/module/src/main/server/routes/health.ts`, registrado DEPOIS do CORS
+(o Console precisa ler o status cross-origin) e ANTES do gate de sessao —
+prova de processo, nao toca o Mongo. O flip dos probes ACONTECEU em 02/09/2026
+(PR values-only, depois da imagem pinada em dev — ver D6): `health.liveness/
+readiness.path` e `ingress.healthcheckPath` apontam para `/health`. Segue
+pendente:
+(1) `/readyz` honesto (`db.admin().ping()` com timeout curto, fail-closed) —
+o readiness da api segue sem tocar o Mongo, entao um pod com banco inacessivel
+continua entrando no Service;
+(2) `/api/version` (`{ gitSha: process.env.GIT_SHA }` — o chart ja injeta
+`GIT_SHA` em todo workload) e preencher `health.version`.
 
 **PENDENTE-2 — `LANGWATCH_PROJECT_ID` via SSM ParameterStore.**
 O CONTRATO §4 lista `SSM /hapvida/<env>/kos/components/langwatch-project-id`, mas

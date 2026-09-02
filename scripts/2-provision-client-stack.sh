@@ -41,11 +41,7 @@ step "rodando migrações"
 live make migrate "CLIENT=${NAME}" || die "migrações falharam"
 
 # ---------- health: langwatch (first boot runs its own migrations, be patient) ----------
-check_lw() {
-  local c
-  c=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://localhost:${LANGWATCH_PORT}/" 2>/dev/null || true)
-  [[ "$c" == "200" || "$c" == "302" || "$c" == "307" ]]
-}
+check_lw() { lw_ready "http://localhost:${LANGWATCH_PORT}"; }
 if ! wait_live "aguardando LangWatch (primeiro boot roda migrações — paciência)" \
      "http://localhost:${LANGWATCH_PORT}" check_lw 60 5; then
   info "${YLW}LangWatch AINDA SUBINDO — re-rode o onboarding depois (make logs CLIENT=${NAME})${RST}"

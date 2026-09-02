@@ -60,12 +60,7 @@ if [[ -n "$PROJECT_ID" ]]; then
   exit 0
 fi
 
-check_lw() {
-  local c
-  c=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "${BASE}/" 2>/dev/null || true)
-  [[ "$c" == "200" || "$c" == "302" || "$c" == "307" ]]
-}
-check_lw || die "LangWatch não responde em ${BASE} — rode ./scripts/2-provision-client-stack.sh ${NAME} antes; se LANGWATCH_PUBLIC_URL aponta para um reverse proxy, ele também precisa estar no ar"
+lw_ready "$BASE" || die "LangWatch não responde em ${BASE} — rode ./scripts/2-provision-client-stack.sh ${NAME} antes; se LANGWATCH_PUBLIC_URL aponta para um reverse proxy, ele também precisa estar no ar"
 
 trpc_ok() { # $1 = tRPC batch response; fails if it carries an error
   python3 -c 'import json,sys; body=json.loads(sys.argv[1]); sys.exit(1 if "error" in body[0] else 0)' "$1"

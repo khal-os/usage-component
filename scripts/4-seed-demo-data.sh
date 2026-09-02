@@ -64,6 +64,15 @@ fi
 
 # ---------- traces ----------
 if [[ "$DO_TRACES" -eq 1 ]]; then
+  # O passo 3 re-aplica a stack ao estampar o LANGWATCH_PROJECT_ID, o que
+  # RECRIA o contêiner do LangWatch — empurrar tráfego enquanto ele ainda
+  # reboota falha inteiro com "fetch failed" (0/N enviados). Espera limitada
+  # até ele responder de novo; já no ar (re-run standalone) passa na hora.
+  check_lw() { lw_ready "http://localhost:${LANGWATCH_PORT}"; }
+  wait_live "demo: aguardando o LangWatch (o passo 3 recria o contêiner)" \
+    "http://localhost:${LANGWATCH_PORT}" check_lw 60 5 \
+    || die "LangWatch não voltou em http://localhost:${LANGWATCH_PORT} após 300s — veja: make logs CLIENT=${NAME}"
+
   # Decisão 127: a key não mora no env do cliente — o push a lê do Postgres
   # do LangWatch na hora (mesma fonte de onde o onboarding lê o project id).
   KEY_NOW="$(lw_project_key || true)"

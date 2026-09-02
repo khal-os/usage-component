@@ -31,14 +31,14 @@ extraEgress:
 # ── Pins (ESCRITO POR deploy/gitops-pin.sh — nao editar a mao) ────────────────
 pins:
   usage-module:
-    digest: "sha256:141e3f5e105cea80ac7440d393bf67f873a576db8b1061c984d447c5b2a0a876"
-    gitSha: "0b537ae8cde265be16e59193e639f1e3d9986abe"
+    digest: "sha256:0cbe68ca123569d4d40e17c537ad39472eb7bda4a1a9d9c0a1be9f3c13e484f0"
+    gitSha: "fca63c09dc3cc1de6271a107f142fcdc802a4a30"
   usage-connector:
-    digest: "sha256:d2eb6b77188f63b7ae5162022563c0c144fcc053b4df139aa52e050cd5b4eaf2"
-    gitSha: "0b537ae8cde265be16e59193e639f1e3d9986abe"
+    digest: "sha256:324d35541248cb75cc46ad1ef947e5afce035d98dd9d9a55fc0454a5a321d64f"
+    gitSha: "fca63c09dc3cc1de6271a107f142fcdc802a4a30"
   usage-db-backup:
-    digest: "sha256:38bed3f9b3f6846db2daa6db370d3ab1044c4007b22385f97e559731569639c7"
-    gitSha: "0b537ae8cde265be16e59193e639f1e3d9986abe"
+    digest: "sha256:badba2ee61789848cc281eacb393a9868218fdf7b074c15814b051d1e857eec2"
+    gitSha: "fca63c09dc3cc1de6271a107f142fcdc802a4a30"
 
 services:
   api:
