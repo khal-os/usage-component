@@ -32,6 +32,12 @@ import { config } from '../../../infrastructure/index.js';
  * Auth is `Authorization: Bearer` (no cookies, no Allow-Credentials): the
  * JWT is the security boundary. CORS only ever mattered for the OPEN-API
  * posture, which stays locked.
+ *
+ * Preflights (decision 174): a request with an Authorization header makes
+ * the browser send OPTIONS first, and the fetch spec requires a 2xx back.
+ * The middleware answers 204 itself — for ALLOWED origins only; an
+ * unlisted origin still gets silence and a non-CORS OPTIONS still falls
+ * through to routing.
  */
 
 type OriginRule =
@@ -104,28 +110,45 @@ export const originAllowedBy =
       );
     });
 
-const rules = parseAllowedOrigins(config.corsAllowedOrigins ?? '');
-const isAllowed = originAllowedBy(rules);
+export const buildCorsMiddleware = (rawAllowedOrigins: string) => {
+  const rules = parseAllowedOrigins(rawAllowedOrigins);
+  const isAllowed = originAllowedBy(rules);
 
-export const corsMiddleware = (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  const origin = req.headers.origin;
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const origin = req.headers.origin;
+    const allowed = origin !== undefined && isAllowed(origin);
 
-  if (origin && isAllowed(origin)) {
-    // The EXACT request origin is echoed, never the pattern — a pattern in
-    // Allow-Origin is not a valid header value and browsers reject it.
-    res.set('access-control-allow-origin', origin);
-    res.set('access-control-allow-methods', 'GET,POST');
-    res.set('access-control-allow-headers', 'Content-Type, Authorization');
-  }
+    if (allowed) {
+      // The EXACT request origin is echoed, never the pattern — a pattern in
+      // Allow-Origin is not a valid header value and browsers reject it.
+      res.set('access-control-allow-origin', origin);
+      res.set('access-control-allow-methods', 'GET,POST');
+      res.set('access-control-allow-headers', 'Content-Type, Authorization');
+    }
 
-  // Caches must never serve one origin's answer to another.
-  if (rules.length > 0) {
-    res.set('vary', 'Origin');
-  }
+    // Caches must never serve one origin's answer to another.
+    if (rules.length > 0) {
+      res.set('vary', 'Origin');
+    }
 
-  next();
+    // Preflights END here for allowed origins (decision 174): with no
+    // OPTIONS route they fell through to the JSON 404 — WITH the Allow-*
+    // headers present, which is what hid it — and the fetch spec requires
+    // a 2xx preflight, so any cross-origin request carrying Authorization
+    // (the console's session-first health probe) died in the browser
+    // before it left. An unlisted origin keeps getting NO answer from this
+    // middleware (the audit D-1 posture), and a non-CORS OPTIONS keeps
+    // falling through to routing.
+    if (allowed && req.method === 'OPTIONS') {
+      res.set('access-control-max-age', '600');
+      res.status(204).end();
+      return;
+    }
+
+    next();
+  };
 };
+
+export const corsMiddleware = buildCorsMiddleware(
+  config.corsAllowedOrigins ?? '',
+);
