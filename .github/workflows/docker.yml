@@ -53,12 +53,17 @@ jobs:
       # Blocking on FIXABLE criticals only: a critical with a released fix
       # is actionable (bump the base image / dep); unfixed upstream CVEs
       # would block PRs on things no change here can address.
+      # ignore-unfixed keys on the LIBRARY fix, though: a CVE fixed in a Go
+      # module that NO release of the vendored binary ships yet counts as
+      # "fixable" while being just as unactionable. Those get a DATED entry
+      # in .trivyignore instead of a looser gate (decision 173).
       - name: Trivy — critical (blocking)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ matrix.image }}:ci
           severity: CRITICAL
           ignore-unfixed: true
+          trivyignores: .trivyignore
           exit-code: '1'
       - name: Trivy — high (report only)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -66,6 +71,7 @@ jobs:
           image-ref: ${{ matrix.image }}:ci
           severity: HIGH
           ignore-unfixed: true
+          trivyignores: .trivyignore
           exit-code: '0'
           skip-setup-trivy: true
       # Feeds the docker dashboard (decision 146): image size + fixable
@@ -77,6 +83,7 @@ jobs:
           image-ref: ${{ matrix.image }}:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          trivyignores: .trivyignore
           format: json
           output: trivy.json
           exit-code: '0'

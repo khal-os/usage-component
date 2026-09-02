@@ -154,6 +154,16 @@ host_port() {
 # there — an API key containing any of them would corrupt the write.
 sed_escape() { printf '%s' "$1" | sed -e 's/[&\|]/\\&/g'; }
 
+# LangWatch readiness probe against a base URL (no trailing slash).
+# 200/302/307 all mean "up" — the root redirects to auth or onboarding
+# depending on instance state. Meant as the body of a wait_live check:
+#   check_lw() { lw_ready "http://localhost:${LANGWATCH_PORT}"; }
+lw_ready() {
+  local c
+  c=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$1/" 2>/dev/null || true)
+  [[ "$c" == "200" || "$c" == "302" || "$c" == "307" ]]
+}
+
 # LangWatch's own Postgres is the source of truth for project id and API
 # key (decisão 127: nada disso mora em contêiner nosso; a key nem no env —
 # o pipeline de demo a lê daqui na hora do push, e um cliente real copia
