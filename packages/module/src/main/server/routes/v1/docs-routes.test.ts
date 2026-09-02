@@ -63,6 +63,7 @@ describe('API Docs (OpenAPI)', () => {
         '/api/v1/traces',
         '/api/v1/traces/filters',
         '/api/v1/traces/{id}',
+        '/health',
       ]);
     });
 
@@ -91,7 +92,7 @@ describe('API Docs (OpenAPI)', () => {
       expect(response.body.info.version).toMatch(/^\d+\.\d+\.\d+$/);
     });
 
-    it('MUST document the env-gated bearer auth: scheme, top-level security and a 401 on every path (C-4.1)', async () => {
+    it('MUST document the env-gated bearer auth: scheme, top-level security and a 401 on every gated path (C-4.1)', async () => {
       const response = await request(app)
         .get('/api/v1/docs/openapi.json')
         .expect(200);
@@ -106,16 +107,26 @@ describe('API Docs (OpenAPI)', () => {
 
       const paths = response.body.paths as Record<
         string,
-        Record<string, { responses: Record<string, unknown> }>
+        Record<
+          string,
+          { responses: Record<string, unknown>; security?: unknown[] }
+        >
       >;
 
       for (const [pathName, operations] of Object.entries(paths)) {
         for (const [method, operation] of Object.entries(operations)) {
+          // `security: []` marks an operation OPEN (overrides the global
+          // bearerAuth) — /health, decision 172. An open route never
+          // answers 401, so documenting one there would be the lie this
+          // test exists to catch — the invariant is two-sided.
+          const isOpen =
+            Array.isArray(operation.security) &&
+            operation.security.length === 0;
           expect({
             path: pathName,
             method,
             has401: '401' in operation.responses,
-          }).toEqual({ path: pathName, method, has401: true });
+          }).toEqual({ path: pathName, method, has401: !isOpen });
         }
       }
     });

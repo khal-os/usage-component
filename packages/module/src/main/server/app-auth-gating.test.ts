@@ -6,15 +6,18 @@ import {
   setupV1Routes,
 } from './helpers/index.js';
 import { buildAuthMiddleware } from './middlewares/index.js';
+import { registerHealthRoute } from './routes/health.js';
 import { nullLogger } from '@observability/core/common/logging/null-logger.js';
 import { TokenAuthenticator } from '../../application/interfaces/token-authenticator.js';
 
 /**
  * Mirrors app.ts's LOAD-BEARING ordering with a real (stubbed-authenticator)
  * auth middleware injected: docs are mounted BEFORE auth on purpose — they
- * are the healthcheck and stay open (decision Q5); everything under /api/v1
- * behind them answers 401. If someone reorders app.ts, this is the test
- * that says which behavior was the contract.
+ * are the healthcheck and stay open (decision Q5) — and GET /health sits
+ * right before the gate too (decision 172: liveness has no token);
+ * everything under /api/v1 behind them answers 401. If someone reorders
+ * app.ts or middlewares-setup, this is the test that says which behavior
+ * was the contract.
  */
 const rejectEverything: TokenAuthenticator = {
   isAuthenticated: async () => false,
@@ -22,9 +25,10 @@ const rejectEverything: TokenAuthenticator = {
 
 const makeAppWithAuth = () => {
   const app = express();
-  // Same sequence as app.ts: docs first, then auth, then the API routes,
-  // then the 404/error boundary.
+  // Same sequence as app.ts: docs first, then /health, then auth, then the
+  // API routes, then the 404/error boundary.
   setupDocs(app);
+  registerHealthRoute(app);
   app.use(buildAuthMiddleware(rejectEverything));
   const routes = setupV1Routes(app);
   setupErrorHandling(app, routes, nullLogger);
@@ -48,6 +52,13 @@ describe('App auth gating (env-gated M2M bearer)', () => {
       .get('/api/v1/docs/openapi.json')
       .expect(200);
     expect(openapi.body.openapi).toBe('3.1.0');
+  });
+
+  it('MUST keep GET /health open while the gate rejects everything — the probe has no token (decision 172)', async () => {
+    const app = makeAppWithAuth();
+
+    const health = await request(app).get('/health').expect(200);
+    expect(health.body).toEqual({ status: 'ok', component: 'usage-module' });
   });
 
   it('MUST gate every API face, not just traces', async () => {

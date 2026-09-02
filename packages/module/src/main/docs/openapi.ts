@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { TOKEN_TYPES } from '@observability/core/domain/models/price-version-model.js';
 import path from 'node:path';
 import { z } from 'zod';
-import { apiErrorSchema } from '../../presentation/helpers/docs-schemas.js';
+import {
+  apiErrorSchema,
+  healthResponseSchema,
+} from '../../presentation/helpers/docs-schemas.js';
 import {
   traceDetailResponseSchema,
   traceFilterOptionsResponseSchema,
@@ -219,8 +222,8 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '{KHAL_AUTH_URL}/.well-known/jwks.json (RS256; iss, aud and ' +
           'tenant claims checked; identity-only, no scopes). Without the ' +
           'variable the API answers open (PoC). The docs routes ' +
-          '(/api/v1/docs* and openapi.json) stay open — they are the ' +
-          'healthcheck.',
+          '(/api/v1/docs* and openapi.json) and GET /health stay open — ' +
+          'liveness and the healthcheck need no token (decisions 103/172).',
       },
     },
   },
@@ -230,6 +233,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
     { name: 'Sessions', description: 'Conversas: traces agrupados por sessão (read-model derivado).' },
     { name: 'Billing', description: 'Agregados mensais — soma dos custos carimbados, por construção.' },
     { name: 'Prices', description: 'Tabela de preços contratados (T4) — versões imutáveis por vigência.' },
+    { name: 'Health', description: 'Sonda de vida — aberta por convenção da plataforma (decisão 172).' },
   ],
   paths: {
     '/api/v1/traces': {
@@ -558,6 +562,26 @@ export const buildOpenApiDocument = (clientName?: string) => ({
             'Content-Type não é application/json — a API só aceita JSON (audit D-2).',
           ),
           '500': errorResponse('Erro interno.'),
+        },
+      },
+    },
+    '/health': {
+      get: {
+        tags: ['Health'],
+        summary: 'Liveness — sem autenticação (convenção da plataforma)',
+        description:
+          'Prova que o processo responde — NÃO toca o banco, então uma ' +
+          'queda do Mongo não aparece aqui (o readiness honesto é ' +
+          'follow-up registrado). Aberta por desenho (decisão 172), como ' +
+          'em todos os componentes da plataforma: orquestrador e Catalog ' +
+          'Console sondam sem token, e o manifesto do módulo declara este ' +
+          'caminho em connection.health.',
+        // `security: []` sobrepõe o bearerAuth global: rota ABERTA — e por
+        // isso sem 401 documentado (o docs-routes.test exige 401 só nas
+        // operações gateadas).
+        security: [],
+        responses: {
+          '200': okResponse('Processo vivo.', healthResponseSchema),
         },
       },
     },
