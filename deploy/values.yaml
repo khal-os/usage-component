@@ -139,36 +139,32 @@ services:
     # readOnlyRootFilesystem + emptyDir em /tmp.
     tmpDir: true
     health:
-      # ⚠ O modulo agora TEM `GET /health` — aberto por convencao da plataforma
-      # (decisao 172: e o caminho que o manifesto declara em connection.health e
-      # que o Catalog Console sonda do navegador). /readyz honesto e /api/version
-      # continuam em aberto (CONTRATO §5 permite usar o que existe e registrar
-      # follow-up — ver PENDENTE-1 no README-STREAM). Os probes abaixo seguem
-      # em openapi.json DE PROPOSITO: trocar para /health e um PR de values
-      # SEPARADO, depois que a imagem com a rota estiver pinada no ambiente —
-      # flipar junto abre a janela merge→pin em que o chart ja sonda /health
-      # numa imagem que ainda nao tem a rota. Enquanto isso:
-      #   liveness  = /api/v1/docs/openapi.json — prova de processo: e servido
-      #               pelo express sem tocar o Mongo, entao uma queda do banco
-      #               NAO reinicia os pods em loop (/health tem a mesma
-      #               propriedade quando o flip vier).
+      # Probes em `/health` (decisao 172): rota ABERTA por convencao da
+      # plataforma — a mesma que o manifesto declara em connection.health e
+      # que o Catalog Console sonda do navegador. Uma so grafia do health em
+      # todo o stack (probe do kubelet, healthcheck do ALB, chip do Console).
+      # E prova de PROCESSO: responde 200 seco sem tocar o Mongo, entao uma
+      # queda do banco NAO reinicia os pods em loop.
       #   readiness = o MESMO path. Isso e HONESTO sobre o que se sabe hoje:
-      #               anunciar "ready" checando o banco exigiria /readyz, que nao
-      #               existe. Um readiness que mente para MENOS (nao entra no
-      #               Service) e caro; este mente para MAIS, e o follow-up e
-      #               justamente fechar essa lacuna.
-      # `/api/v1/docs` (sem barra) responde 301 -> `/api/v1/docs/`: o kubelet
-      # aceita 3xx, mas o ALB so aceita 200 por padrao — por isso o path com
-      # openapi.json, que responde 200 nos dois e continua ABERTO quando o gate
-      # de sessao (KHAL_AUTH_URL) esta ligado.
+      #               anunciar "ready" checando o banco exigiria /readyz, que
+      #               nao existe. Um readiness que mente para MENOS (nao entra
+      #               no Service) e caro; este mente para MAIS, e o follow-up
+      #               (PENDENTE-1 no README-STREAM) e fechar essa lacuna.
+      # ⚠ Ordem do flip (a razao de este PR ser values-only): a imagem com a
+      # rota tem que estar PINADA no ambiente ANTES destas linhas apontarem
+      # para ela — em dev ja esta; hml/prod recebem chart e re-pin JUNTOS na
+      # promocao, entao a ordem se preserva sozinha. Durante o primeiro
+      # rollout pos-flip o ALB pode marcar os pods VELHOS unhealthy por
+      # minutos (imagem antiga responde 401 em /health) — sem healthy target
+      # o ALB roteia fail-open, e os pods novos entram logo em seguida.
       liveness:
-        path: /api/v1/docs/openapi.json
+        path: /health
         initialDelaySeconds: 15
         periodSeconds: 20
         timeoutSeconds: 3
         failureThreshold: 6
       readiness:
-        path: /api/v1/docs/openapi.json
+        path: /health
         initialDelaySeconds: 5
         periodSeconds: 10
         timeoutSeconds: 3
@@ -179,7 +175,7 @@ services:
       enabled: true
       # host vem do values do ambiente (api-dev. / api-hml. / api.hapvida.khal.ai)
       host: ""
-      healthcheckPath: /api/v1/docs/openapi.json
+      healthcheckPath: /health
     # Paths do Secrets Manager (relativos a `secretsPathPrefix` do ambiente):
     #   app   -> knobs sensiveis da aplicacao
     #   mongo -> MONGO_DB_HOST / MONGO_DB_USER / MONGO_DB_PASSWORD (Atlas)
