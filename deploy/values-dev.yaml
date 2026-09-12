@@ -65,6 +65,19 @@ services:
       # O parser aceita `https://*.<dominio>` e casa exatamente um label — nunca
       # `*` nu (audit D-1) e nunca http.
       CORS_ALLOWED_ORIGINS: https://hapvida-dev.khal.ai,https://*.hapvida.khal.ai
+      # ── Porta MCP (T12, decisoes 175-180) ──
+      # Opt-in: sem MCP_CANONICAL_URL nenhuma rota /mcp e montada. Com ela, o
+      # boot EXIGE KHAL_AUTH_URL + KHAL_TENANT (ja acima e no values base) e
+      # MCP_CONFIRMATION_KEY (>= 32 chars) — esta ultima vem do secret `app`
+      # via ExternalSecret (`dataFrom: extract` traz a chave inteira), porque a
+      # schema reprova literal em nome terminado em _KEY. PRE-REQUISITO: a
+      # chave tem de existir no secret ANTES deste merge, senao o pod da api
+      # recusa subir — a recusa e o comportamento desenhado, nao um bug.
+      MCP_CANONICAL_URL: https://api-dev.hapvida.khal.ai/mcp
+      # `aud` estrito do token de sessao no /mcp (nao entra na lista tolerante
+      # de KHAL_TOKEN_AUDIENCE). Derivado pelo khal-auth do module `usage` do
+      # Module Catalog: <module-id>-mcp (ADR-125).
+      MCP_AUDIENCE: usage-mcp
 
   trace-ingestion-worker:
     envOverride:
