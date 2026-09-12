@@ -70,12 +70,31 @@ describe('bearerTokenOf', () => {
     },
   );
 
-  it.each([undefined, '', 'abc', 'Basic abc', 'Bearer', 'Bearer    '])(
-    'MUST refuse %p',
-    (header) => {
-      expect(bearerTokenOf(header)).toBeUndefined();
-    },
-  );
+  it('MUST accept a tab as the separator, like the header grammar allows', () => {
+    expect(bearerTokenOf('Bearer\tabc')).toBe('abc');
+  });
+
+  it.each([
+    undefined,
+    '',
+    'abc',
+    'Basic abc',
+    'Bearer',
+    'Bearer    ',
+    'Bearerabc',
+  ])('MUST refuse %p', (header) => {
+    expect(bearerTokenOf(header)).toBeUndefined();
+  });
+
+  it('MUST stay LINEAR on a hostile header (the ReDoS CodeQL flagged)', () => {
+    // The previous regex (`/^Bearer\s+(.+)$/i`) made the engine try every
+    // split between the separator and the token on this input.
+    const hostile = `Bearer ${' '.repeat(200_000)}`;
+    const started = Date.now();
+
+    expect(bearerTokenOf(hostile)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(200);
+  });
 });
 
 describe('the MCP door (decision 176)', () => {

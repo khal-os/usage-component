@@ -17,9 +17,34 @@ export interface McpAuthOptions {
   readonly logger: Logger;
 }
 
-/** RFC 6750 §2.1: the scheme is case-insensitive, the token is not. */
-export const bearerTokenOf = (header: string | undefined): string | undefined =>
-  header?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || undefined;
+const BEARER_SCHEME = 'bearer';
+/** One char, no quantifier: the separator test can never backtrack. */
+const SEPARATOR = /^[ \t]/;
+
+/**
+ * RFC 6750 §2.1: the scheme is case-insensitive, the token is not.
+ *
+ * Parsed without a quantified pattern ON PURPOSE. The obvious
+ * `/^Bearer\s+(.+)$/i` is polynomial on a header an attacker fully controls
+ * ('bearer ' + a megabyte of spaces makes the engine try every split between
+ * `\s+` and `.+`), which is a denial of service reachable from the open
+ * internet — CodeQL flagged exactly that. Prefix, separator, slice: linear.
+ */
+export const bearerTokenOf = (
+  header: string | undefined,
+): string | undefined => {
+  if (header === undefined) return undefined;
+  if (!header.toLowerCase().startsWith(BEARER_SCHEME)) return undefined;
+
+  const rest = header.slice(BEARER_SCHEME.length);
+  // RFC 6750 wants at least one space between scheme and credentials; a tab is
+  // accepted too, as the previous parser did.
+  if (!SEPARATOR.test(rest)) return undefined;
+
+  const token = rest.trim();
+
+  return token === '' ? undefined : token;
+};
 
 /**
  * RFC 9728 §5.1: the challenge points the client at the metadata naming its
