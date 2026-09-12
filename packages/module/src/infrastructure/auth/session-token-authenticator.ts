@@ -1,6 +1,6 @@
-import { createLocalJWKSet, jwtVerify } from 'jose';
-import type { JSONWebKeySet } from 'jose';
+import { jwtVerify } from 'jose';
 import { TokenAuthenticator } from '../../application/interfaces/token-authenticator.js';
+import { JwksKeySource, KeySet, isUnknownKidError } from './jwks-key-source.js';
 
 export interface SessionTokenAuthenticatorOptions {
   /**
@@ -17,6 +17,8 @@ export interface SessionTokenAuthenticatorOptions {
   tenant: string;
   /** JWKS fetch timeout (default 3000ms — same bound the introspector used). */
   timeoutMs?: number;
+  /** Injected in tests; production builds its own from `authUrl`. */
+  keySource?: JwksKeySource;
 }
 
 /**
@@ -38,21 +40,27 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
   private readonly authUrl: string;
   private readonly audiences: string[];
   private readonly tenant: string;
-  private readonly timeoutMs: number;
-  private keySet?: ReturnType<typeof createLocalJWKSet>;
-  private refreshing?: Promise<
-    ReturnType<typeof createLocalJWKSet> | undefined
-  >;
+  // The key set lives in JwksKeySource (shared with the MCP door's
+  // verifier): ONE cache, one refresh policy, one spelling of "the JWKS
+  // moved" — the same reason the log and mongo env readers live in core.
+  private readonly keySource: JwksKeySource;
 
   constructor(options: SessionTokenAuthenticatorOptions) {
     this.authUrl = options.authUrl;
     this.audiences = options.audiences;
     this.tenant = options.tenant;
-    this.timeoutMs = options.timeoutMs ?? 3000;
+    this.keySource =
+      options.keySource ??
+      new JwksKeySource({
+        authUrl: options.authUrl,
+        ...(options.timeoutMs !== undefined && {
+          timeoutMs: options.timeoutMs,
+        }),
+      });
   }
 
   async isAuthenticated(token: string): Promise<boolean> {
-    const keySet = this.keySet ?? (await this.refreshKeySet());
+    const keySet = await this.keySource.current();
     // JWKS unreachable/malformed: uncached error — fail closed NOW, the
     // very next request re-fetches (an auth blip must not linger).
     if (!keySet) return false;
@@ -62,14 +70,14 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
 
     // The token names a kid the cached set lacks — keys may have rotated
     // since the fetch. Re-fetch ONCE and retry; still unknown → refuse.
-    const fresh = await this.refreshKeySet();
+    const fresh = await this.keySource.refresh();
     if (!fresh) return false;
     return (await this.verify(token, fresh)) === true;
   }
 
   private async verify(
     token: string,
-    keySet: ReturnType<typeof createLocalJWKSet>,
+    keySet: KeySet,
   ): Promise<boolean | 'unknown-kid'> {
     try {
       const { payload } = await jwtVerify(token, keySet, {
@@ -80,36 +88,7 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
       });
       return payload.tenant === this.tenant;
     } catch (error) {
-      const code = (error as { code?: unknown }).code;
-      return code === 'ERR_JWKS_NO_MATCHING_KEY' ? 'unknown-kid' : false;
-    }
-  }
-
-  /** Concurrent misses share one in-flight JWKS fetch (cold start, rotation). */
-  private refreshKeySet(): Promise<
-    ReturnType<typeof createLocalJWKSet> | undefined
-  > {
-    this.refreshing ??= this.fetchKeySet().finally(() => {
-      this.refreshing = undefined;
-    });
-    return this.refreshing;
-  }
-
-  private async fetchKeySet(): Promise<
-    ReturnType<typeof createLocalJWKSet> | undefined
-  > {
-    try {
-      const response = await fetch(
-        `${this.authUrl.replace(/\/+$/, '')}/.well-known/jwks.json`,
-        { signal: AbortSignal.timeout(this.timeoutMs) },
-      );
-      if (!response.ok) return undefined;
-      const jwks = (await response.json()) as JSONWebKeySet;
-      const keySet = createLocalJWKSet(jwks);
-      this.keySet = keySet;
-      return keySet;
-    } catch {
-      return undefined;
+      return isUnknownKidError(error) ? 'unknown-kid' : false;
     }
   }
 }

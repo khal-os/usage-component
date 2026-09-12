@@ -9,6 +9,8 @@ import {
   makeRequestLoggerMiddleware,
 } from '../middlewares/index.js';
 import { makeAuthMiddleware } from '../../factories/auth-factory.js';
+import { makeMcpRuntime } from '../../factories/mcp-factory.js';
+import { registerMcpRoutes } from '../../mcp/mcp-routes.js';
 import { registerHealthRoute } from '../routes/health.js';
 
 export const setupMiddlewares = (app: Application, logger: Logger): void => {
@@ -30,6 +32,16 @@ export const setupMiddlewares = (app: Application, logger: Logger): void => {
   // because liveness has no token — the platform convention every
   // register follows.
   registerHealthRoute(app);
+  // The MCP endpoint (T12, decision 175) sits EXACTLY here, for the same
+  // reason /health does — position is the contract. AFTER corsMiddleware,
+  // because a browser-hosted client must be able to read the allow-origin
+  // echo; BEFORE the /api/v1 session gate, because this door has its own
+  // gate: a different (strict) audience and a master-only role check. Absent
+  // MCP_CANONICAL_URL the factory returns undefined and nothing is mounted,
+  // so every deployment that does not configure it is byte-for-byte the
+  // server it was before.
+  const mcp = makeMcpRuntime();
+  if (mcp) registerMcpRoutes(app, mcp);
   // After CORS (preflights must answer), before routes. Docs are mounted
   // BEFORE middlewares in app.ts and stay open — they are the path the
   // chart's probes still check (PENDENTE-1 flips them to /health).

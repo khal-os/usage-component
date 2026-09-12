@@ -20,11 +20,14 @@ import { parseQuery } from '../../helpers/query-validation.js';
  * ("which (model, token_type, effective_from) rows exist?"), which used
  * to require mongosh while this route answered 405.
  */
-// Strict (C-3): an unknown param is a 400, never silently ignored.
-const querySchema = z.strictObject({
+/** Exported for the MCP tool of this endpoint (T12) — one parameter contract. */
+export const priceListQueryShape = {
   model: z.string().min(1).optional(),
   token_type: z.enum(TOKEN_TYPES).optional(),
-});
+};
+
+// Strict (C-3): an unknown param is a 400, never silently ignored.
+const querySchema = z.strictObject(priceListQueryShape);
 
 /** Explicit R$-only whitelist (invariant 4): no internal field ever rides along. */
 const toPriceVersionView = (version: PriceVersionModel) => ({

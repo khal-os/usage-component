@@ -100,6 +100,9 @@ export class CloseBillingPeriodDbUseCase implements CloseBillingPeriodUseCase {
   // of the composition, not of the call — the domain interface stays
   // close(year, month).
   private readonly trigger: BillingLifecycleTrigger;
+  // WHO, when the door knows (decision 179): the MCP endpoint passes the
+  // session subject; the runbook and the scheduler have nobody to name.
+  private readonly actor?: string;
 
   constructor(args: {
     billingQueryRepository: BillingQueryRepository;
@@ -108,6 +111,7 @@ export class CloseBillingPeriodDbUseCase implements CloseBillingPeriodUseCase {
     traceRepository: Pick<TraceRepository, 'reconcileQuarantineAfterClose'>;
     now?: () => Date;
     trigger?: BillingLifecycleTrigger;
+    actor?: string;
   }) {
     this.billingQueryRepository = args.billingQueryRepository;
     this.billingPeriodRepository = args.billingPeriodRepository;
@@ -115,6 +119,7 @@ export class CloseBillingPeriodDbUseCase implements CloseBillingPeriodUseCase {
     this.traceRepository = args.traceRepository;
     this.now = args.now ?? (() => new Date());
     this.trigger = args.trigger ?? 'runbook';
+    this.actor = args.actor;
   }
 
   async close(year: number, month: number): Promise<CloseBillingPeriodResult> {
@@ -260,6 +265,7 @@ export class CloseBillingPeriodDbUseCase implements CloseBillingPeriodUseCase {
             at: closedAt,
             action: 'close',
             trigger: this.trigger,
+            ...(this.actor !== undefined && { actor: this.actor }),
             snapshotVersion: version,
           },
         },

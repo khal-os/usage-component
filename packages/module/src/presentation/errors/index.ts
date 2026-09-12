@@ -1,5 +1,6 @@
 export * from './api-error.js';
 export * from './conflict-error.js';
+export * from './forbidden-error.js';
 export * from './method-not-allowed-error.js';
 export * from './missing-param-error.js';
 export * from './invalid-param-error.js';

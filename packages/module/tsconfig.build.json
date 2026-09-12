@@ -11,6 +11,7 @@
     "src/**/*.test.ts",
     "src/**/*.contract.ts",
     "src/**/billing-test-fakes.ts",
+    "src/**/mcp-test-fakes.ts",
     "src/main/server/routes/v1/helpers/route-db-harness.ts",
     "src/architecture-boundaries.spec.ts"
   ],

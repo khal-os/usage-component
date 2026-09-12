@@ -225,6 +225,54 @@ PoC behavior, warned loudly at boot. The interim HTTP Basic gate
 (decision 141, `BASIC_AUTH_*`) is retired — no aliases.
 `/api/v1/docs` stays open either way (container healthcheck).
 
+## MCP (LLM clients)
+
+The module can expose an **MCP server** at `POST /mcp` for desktop LLM clients
+(Claude Code, Claude Desktop, Cursor). It mirrors `/api/v1` tool by tool — same
+controllers, same schemas, same numbers (a test asserts the two doors answer
+byte for byte) — and adds the two operator actions that are runbook-only over
+HTTP as **preview → confirm** pairs: price registration and the month
+lifecycle (decisions 175–180, story T12).
+
+Identity is the person's khal-auth session, never a machine token: 19 tools,
+4 guided prompts, 3 reference resources, master role only in v1.
+
+**Opt-in per deployment — three knobs.** With `MCP_CANONICAL_URL` unset no MCP
+route exists at all; set, it pulls the rest of the contract with it and a
+missing piece is a boot failure (an MCP door is never open, and never signs
+confirmations with a guessable key):
+
+| Knob | Meaning |
+|---|---|
+| `MCP_CANONICAL_URL` | The PUBLIC url of the endpoint, path exactly `/mcp` (e.g. `https://api.<client>.khal.ai/mcp`). It is the RFC 8707/9728 resource identifier, so it must be the address clients actually post to. Requires `KHAL_AUTH_URL` + `KHAL_TENANT`. |
+| `MCP_AUDIENCE` | The one `aud` the endpoint accepts, minted by khal-auth for this resource. Declared, never inferred. |
+| `MCP_CONFIRMATION_KEY` | At least 32 random characters (`openssl rand -hex 32`); signs the confirmation token a preview hands out (valid ten minutes). |
+
+**Connect Claude Code** (over HTTPS the client runs the OAuth login itself):
+
+```bash
+claude mcp add --transport http -s user --client-id khal-mcp usage-dev https://api-dev.<client>.khal.ai/mcp
+```
+
+The endpoint publishes RFC 9728 metadata at
+`/.well-known/oauth-protected-resource` and `…/oauth-protected-resource/mcp`
+(both open, no token), answers `401` with a
+`WWW-Authenticate: Bearer resource_metadata="…"` challenge, and `405` to `GET`
+and `DELETE` (stateless: there is no stream to open and no session to end).
+
+**The rule every write follows.** `preview_*` changes nothing and returns the
+effect plus a `confirmation_token`; the confirming tool refuses any drift from
+what was previewed, any token older than ten minutes, and any token issued to
+another user. The client must show the preview to the person and confirm only
+on their explicit approval — the approval is the person's, not the model's.
+
+**Locally**, point the knobs at a local khal-auth and talk to the endpoint with
+a bearer token:
+
+```bash
+claude mcp add --transport http -s user usage-local http://localhost:3000/mcp -H "Authorization: Bearer $TOKEN"
+```
+
 ## LangWatch (per client, inside the deployment)
 
 Each client's stack carries its own LangWatch (pinned

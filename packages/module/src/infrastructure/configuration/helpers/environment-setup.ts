@@ -15,6 +15,7 @@ import {
 import { createLogger } from '@observability/core/common/logging/structured-logger.js';
 import {
   BillingSchedulerEnvironmentVariables,
+  McpEnvironmentVariables,
   MongoDbEnvironmentVariables,
   ServerEnvironmentVariables,
 } from '../interfaces/index.js';
@@ -35,6 +36,7 @@ export interface EnvironmentVariables
     ServerEnvironmentVariables,
     MongoDbEnvironmentVariables,
     BillingSchedulerEnvironmentVariables,
+    McpEnvironmentVariables,
     LoggingEnvironmentVariables {
   Environment: Environment;
 }
@@ -86,6 +88,25 @@ const optionalBoundedIntString = (name: string, max: number) =>
       }
     });
 
+/** The ONE MCP route; the canonical URL must name it (RFC 8707/9728). */
+export const MCP_PATH = '/mcp';
+
+/** 32 chars of randomness is the floor for an HMAC key that guards writes. */
+const MCP_CONFIRMATION_KEY_MIN_LENGTH = 32;
+
+/** The pathname of a canonical URL, or undefined when it is not a URL at all. */
+const mcpPathOf = (value: string): string | undefined => {
+  try {
+    const url = new URL(value);
+
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? url.pathname.replace(/\/+$/, '')
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const envSchema = z
   .object({
     ENVIRONMENT: z.enum([
@@ -118,6 +139,14 @@ const envSchema = z
     // audit D-1: cross-origin is an explicit operator act — exact origins,
     // comma-separated; unset/empty = same-origin only (no CORS headers).
     CORS_ALLOWED_ORIGINS: optionalNonEmptyString,
+    // T12 (decision 175): the MCP endpoint. SET → POST /mcp is mounted and
+    // the refine below demands the rest of the contract; unset → no MCP
+    // route exists at all (every current deployment keeps its behavior).
+    MCP_CANONICAL_URL: optionalNonEmptyString,
+    // Decision 177: signs the confirmation tokens previews hand out.
+    MCP_CONFIRMATION_KEY: optionalNonEmptyString,
+    // Decision 176: the one `aud` the endpoint accepts.
+    MCP_AUDIENCE: optionalNonEmptyString,
     // Decision 131: knobs of the opt-in billing-close scheduler. Bounds:
     // delay up to 7 days, interval up to 24h — beyond either the operator
     // wants a different mechanism, not a bigger number.
@@ -160,6 +189,64 @@ const envSchema = z
         message:
           'KHAL_TOKEN_AUDIENCE must name at least one audience ' +
           '(comma-separated list, e.g. "tracing,billing")',
+      });
+    }
+
+    // T12: the MCP endpoint is all-or-nothing. The knob that turns it on
+    // drags its whole contract with it, and every missing piece is a BOOT
+    // failure — an MCP door that answers without checking who is calling,
+    // or one that mints confirmation tokens under a guessable key, must not
+    // be reachable at all. MCP_CONFIRMATION_KEY without the URL is NOT an
+    // error: the key is provisioned per environment (secret store) while
+    // the endpoint stays off until the URL is declared.
+    if (!env.MCP_CANONICAL_URL) return;
+
+    if (!env.KHAL_AUTH_URL || !env.KHAL_TENANT) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'MCP_CANONICAL_URL requires KHAL_AUTH_URL and KHAL_TENANT — the ' +
+          'MCP endpoint is never open (decision 175)',
+      });
+    }
+
+    if (!env.MCP_AUDIENCE) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'MCP_AUDIENCE is required when MCP_CANONICAL_URL is set — the ' +
+          'audience tokens must carry is declared, never inferred ' +
+          '(decision 176)',
+      });
+    }
+
+    if (!env.MCP_CONFIRMATION_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'MCP_CONFIRMATION_KEY is required when MCP_CANONICAL_URL is set — ' +
+          'it signs the confirmation tokens of every write (decision 177)',
+      });
+    } else if (
+      env.MCP_CONFIRMATION_KEY.length < MCP_CONFIRMATION_KEY_MIN_LENGTH
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'MCP_CONFIRMATION_KEY must be at least ' +
+          `${MCP_CONFIRMATION_KEY_MIN_LENGTH} characters ` +
+          '(e.g. `openssl rand -hex 32`)',
+      });
+    }
+
+    const canonicalPath = mcpPathOf(env.MCP_CANONICAL_URL);
+
+    if (canonicalPath !== MCP_PATH) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          `MCP_CANONICAL_URL must be an absolute http(s) URL whose path is exactly ${MCP_PATH} ` +
+          '(it IS the resource identifier clients post to — RFC 8707/9728)',
       });
     }
   })
@@ -233,6 +320,9 @@ export const environment: EnvironmentVariables = {
   khalTenant: safeEnvironment.KHAL_TENANT,
   khalTokenAudiences: safeEnvironment.KHAL_TOKEN_AUDIENCE,
   corsAllowedOrigins: safeEnvironment.CORS_ALLOWED_ORIGINS,
+  mcpCanonicalUrl: safeEnvironment.MCP_CANONICAL_URL,
+  mcpConfirmationKey: safeEnvironment.MCP_CONFIRMATION_KEY,
+  mcpAudience: safeEnvironment.MCP_AUDIENCE,
   billingAutoCloseDelayMinutes:
     safeEnvironment.BILLING_AUTO_CLOSE_DELAY_MINUTES,
   billingAutoCloseCheckIntervalSeconds:

@@ -205,11 +205,14 @@ ${reopenHtml}
 </html>`;
 };
 
-/** Strict (C-3): an unknown param is a 400, never silently ignored. */
-const statementQuerySchema = z.strictObject({
+/** Exported for the MCP tool of this endpoint (T12) — one parameter contract. */
+export const statementQueryShape = {
   ...yearMonthQueryShape,
   format: z.enum(['csv', 'html']).default('csv'),
-});
+};
+
+/** Strict (C-3): an unknown param is a 400, never silently ignored. */
+const statementQuerySchema = z.strictObject(statementQueryShape);
 
 export class ExportStatementController implements Controller {
   private readonly getBillingSummary: GetBillingSummaryUseCase;
