@@ -40,9 +40,11 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
   private readonly authUrl: string;
   private readonly audiences: string[];
   private readonly tenant: string;
-  // The key set lives in JwksKeySource (shared with the MCP door's
-  // verifier): ONE cache, one refresh policy, one spelling of "the JWKS
-  // moved" — the same reason the log and mongo env readers live in core.
+  // The key set lives in JwksKeySource; the composition root hands BOTH doors
+  // (this gate and the MCP endpoint) the same instance, so there is one cache,
+  // one refresh policy and one spelling of "the JWKS moved" — the same reason
+  // the log and mongo env readers live in core. A caller that constructs this
+  // without one gets its own, which is what the unit suite does.
   private readonly keySource: JwksKeySource;
 
   constructor(options: SessionTokenAuthenticatorOptions) {

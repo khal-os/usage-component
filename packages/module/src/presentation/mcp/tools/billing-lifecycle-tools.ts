@@ -35,6 +35,7 @@ import {
   BillRow,
   WriteClock,
   confirmationArg,
+  earliestBill,
   findBill,
   hashOf,
   mintedAt,
@@ -204,6 +205,24 @@ export const billingLifecycleTools = (
       const row = findBill(bills.bills, year, month);
       const blockers: string[] = [];
 
+      // A month BEFORE the archive begins has no row, so every blocker below
+      // would skip and the preview would happily mint a token to "close"
+      // 2019-03 on a store whose data starts in 2026 — writing a snapshot for
+      // a month that never existed, and moving the live-scan anchor with it. A
+      // gap month INSIDE the archive stays closable: closing it is how the
+      // bound advances past a month that genuinely had no traffic.
+      const earliest = earliestBill(bills.bills);
+
+      if (
+        row === undefined &&
+        earliest &&
+        isBefore({ year, month }, earliest)
+      ) {
+        blockers.push(
+          `The archive has no data before ${earliest.month_label} — there is nothing to close in ${periodId(year, month)}.`,
+        );
+      }
+
       if (!monthHasEnded({ year, month }, deps.clock.now())) {
         blockers.push(
           `${periodId(year, month)} has not ended yet in the client timezone — only a fully past month can close (a current month is partial by definition).`,
@@ -216,18 +235,21 @@ export const billingLifecycleTools = (
         );
       }
 
+      // Presence in /bills IS the signal, not the trace counts: an execution
+      // with a model and zero measured tokens (decision 128,
+      // `no_measured_usage`) counts in NEITHER stamped nor pending, so a
+      // count-based test called such a month trace-free and the preview
+      // promised a close the use case then refused.
       const olderOpen = bills.bills
         .filter(
           (bill) =>
-            isBefore(bill, { year, month }) &&
-            bill.period_status === 'open' &&
-            bill.stamped_trace_count + bill.pending_trace_count > 0,
+            isBefore(bill, { year, month }) && bill.period_status === 'open',
         )
         .sort((a, b) => a.year * 12 + a.month - (b.year * 12 + b.month))[0];
 
       if (olderOpen) {
         blockers.push(
-          `${olderOpen.month_label} has executions and was never closed — months close oldest first, so close ${periodId(olderOpen.year, olderOpen.month)} before this one.`,
+          `${olderOpen.month_label} is open and still has executions of its own — months close oldest first, so close ${periodId(olderOpen.year, olderOpen.month)} before this one.`,
         );
       }
 

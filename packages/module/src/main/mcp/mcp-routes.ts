@@ -1,5 +1,6 @@
 import { Application, Request, Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { MCP_PATH } from '../../infrastructure/configuration/helpers/environment-setup.js';
 import { Logger } from '@observability/core/common/logging/logger.js';
 import { SessionClaimsVerifier } from '../../application/interfaces/session-claims-verifier.js';
 import { McpSurface } from '../../presentation/mcp/surface.js';
@@ -14,7 +15,10 @@ import {
   resourceMetadataUrlOf,
 } from './protected-resource.js';
 
-export const MCP_PATH = '/mcp';
+// ONE spelling: the env schema validates that MCP_CANONICAL_URL ends in this
+// exact path, so a second literal here could drift from the value the boot
+// enforces — the repo's own named root cause (one rule, two spellings).
+export { MCP_PATH } from '../../infrastructure/configuration/helpers/environment-setup.js';
 
 export interface McpRuntime {
   readonly surface: McpSurface;
@@ -101,6 +105,7 @@ export const registerMcpRoutes = (
       });
       const server = buildMcpServer(runtime.surface, auth.caller, {
         version: runtime.version,
+        logger: runtime.logger,
       });
 
       try {
