@@ -100,7 +100,12 @@ export const resolvePeriodStatus = (
   return 'open';
 };
 
-/** The billing period IS the UTC calendar month (invariant 8) — half-open window. */
+/**
+ * The billing period IS the CLIENT's calendar month (invariant 8) —
+ * half-open window, cut at the client's midnight (decision 130; this
+ * line said UTC until decision 181, which is the rule the bare
+ * `$year`/`$month` of the bills listing had been following).
+ */
 export const monthWindow = (
   year: number,
   month: number,
