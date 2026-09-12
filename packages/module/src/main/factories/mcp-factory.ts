@@ -16,6 +16,7 @@ import {
   makeListBillsController,
   makeReopenBillingPeriodUseCase,
 } from './billing-factory.js';
+import { jwksKeySourceFor } from './auth-factory.js';
 import {
   makeListPriceVersionsController,
   makeRegisterPriceVersionController,
@@ -132,7 +133,13 @@ export const makeMcpRuntimeFrom = (
     surface,
     verifier:
       overrides.verifier ??
-      new KhalAuthClaimsVerifier({ authUrl, audience, tenant }),
+      new KhalAuthClaimsVerifier({
+        authUrl,
+        audience,
+        tenant,
+        // The SAME key set the /api/v1 gate uses (one fetch, one rotation).
+        keySource: jwksKeySourceFor(authUrl),
+      }),
     canonicalUrl,
     authorizationServer: authUrl,
     resourceName: settings.clientName

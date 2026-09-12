@@ -1,8 +1,28 @@
 import { NextFunction, Request, Response } from 'express';
+import { JwksKeySource } from '../../infrastructure/auth/jwks-key-source.js';
 import { config } from '../../infrastructure/index.js';
 import { SessionTokenAuthenticator } from '../../infrastructure/auth/session-token-authenticator.js';
 import { buildAuthMiddleware } from '../server/middlewares/index.js';
 import { makeLogger } from './logger-factory.js';
+
+/**
+ * ONE key set per process, shared by BOTH doors (the /api/v1 session gate and
+ * the MCP endpoint): they verify tokens from the same issuer, so a second
+ * instance would mean a second JWKS fetch, a second rotation window, and two
+ * caches that can disagree about which keys exist. Keyed by URL because the
+ * issuer is configuration, not a constant.
+ */
+const keySources = new Map<string, JwksKeySource>();
+
+export const jwksKeySourceFor = (authUrl: string): JwksKeySource => {
+  const existing = keySources.get(authUrl);
+  if (existing) return existing;
+
+  const created = new JwksKeySource({ authUrl });
+  keySources.set(authUrl, created);
+
+  return created;
+};
 
 /**
  * Session auth on /api/v1 (replaces the interim Basic gate, decision 141 —
@@ -48,6 +68,7 @@ export const makeAuthMiddleware = (): ((
       authUrl,
       audiences: config.khalTokenAudiences,
       tenant,
+      keySource: jwksKeySourceFor(authUrl),
     }),
   );
 };

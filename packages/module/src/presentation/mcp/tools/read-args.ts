@@ -102,7 +102,7 @@ export const seriesArgs = {
     .enum(['month', 'day'])
     .optional()
     .describe(
-      'month (default) walks whole months; day walks the last days, today included.',
+      'month (default) walks whole months; day walks the last days, today included. Each window size belongs to ITS granularity — see months and days.',
     ),
   months: z
     .number()
@@ -110,14 +110,18 @@ export const seriesArgs = {
     .min(1)
     .max(24)
     .optional()
-    .describe('How many months, up to 24.'),
+    .describe(
+      'How many months, up to 24. ONLY with granularity month (the default); sending it with granularity day is refused rather than ignored, because a silently dropped window would answer a different question than the one asked. Default 12.',
+    ),
   days: z
     .number()
     .int()
     .min(1)
     .max(90)
     .optional()
-    .describe('How many days, up to 90.'),
+    .describe(
+      'How many days, up to 90. ONLY with granularity day; sending it with granularity month is refused rather than ignored. Default 30.',
+    ),
 };
 
 export const statementArgs = {

@@ -168,6 +168,48 @@ describe('preview_close_billing_period (decision 179)', () => {
     expect(String(structured['blockers'])).toContain('already closed');
   });
 
+  it('MUST refuse a month BEFORE the archive begins (no row, so every other blocker skips)', async () => {
+    const sut = makeTools({ bills: [billRow({ year: 2026, month: 6 })] });
+
+    const structured = structuredOf(
+      await sut.previewClose.run({ year: 2019, month: 3 }, TEST_CALLER),
+    );
+
+    expect(structured['can_close']).toBe(false);
+    expect(structured['confirmation_token']).toBeNull();
+    expect(String(structured['blockers'])).toContain('no data before');
+    expect(structured['period']).toMatchObject({
+      period_status: 'absent',
+      total_cost_brl_display: 'R$ 0,00',
+    });
+  });
+
+  it('MUST still allow a GAP month inside the archive — closing it is how the bound advances', async () => {
+    const sut = makeTools({
+      bills: [
+        billRow({
+          year: 2026,
+          month: 4,
+          period_status: 'closed',
+          snapshot_version: 1,
+        }),
+        billRow({
+          year: 2026,
+          month: 6,
+          period_status: 'closed',
+          snapshot_version: 1,
+        }),
+      ],
+    });
+
+    const structured = structuredOf(
+      await sut.previewClose.run({ year: 2026, month: 5 }, TEST_CALLER),
+    );
+
+    expect(structured['can_close']).toBe(true);
+    expect(String(structured['confirmation_token']).length).toBeGreaterThan(0);
+  });
+
   it('MUST block the CURRENT month — a month still running is partial by definition', async () => {
     const sut = makeTools({
       bills: [billRow({ year: 2026, month: 9, period_status: 'in_progress' })],
@@ -179,6 +221,32 @@ describe('preview_close_billing_period (decision 179)', () => {
 
     expect(structured['can_close']).toBe(false);
     expect(String(structured['blockers'])).toContain('has not ended');
+  });
+
+  it('MUST block an older OPEN month even when its executions are neither stamped nor pending', async () => {
+    // decision 128: an execution with a model and zero measured tokens is
+    // `no_measured_usage` — counted in NEITHER total, so a count-based test
+    // called this month trace-free and promised a close that would be refused.
+    const sut = makeTools({
+      bills: [
+        billRow({
+          year: 2026,
+          month: 5,
+          period_status: 'open',
+          stamped_trace_count: 0,
+          pending_trace_count: 0,
+        }),
+        billRow({ year: 2026, month: 6, period_status: 'open' }),
+      ],
+    });
+
+    const structured = structuredOf(
+      await sut.previewClose.run(JUNE, TEST_CALLER),
+    );
+
+    expect(structured['can_close']).toBe(false);
+    expect(String(structured['blockers'])).toContain('2026-05');
+    expect(structured['confirmation_token']).toBeNull();
   });
 
   it('MUST block when an OLDER month with executions was never closed (oldest first)', async () => {
@@ -275,6 +343,27 @@ describe('close_billing_period (the confirming half)', () => {
     expect(outcome.ok ? {} : outcome.error.details?.['current']).toMatchObject({
       period_status: 'closed',
     });
+    expect(sut.closes).toEqual([]);
+  });
+
+  it('MUST refuse a token after a close→REOPEN cycle, which leaves the state string identical', async () => {
+    // /bills reports snapshot_version only while a month is CLOSED, so a
+    // reopened month reads `open` with no version again — a state-only stamp
+    // would let this stale token through. The numbers in the stamp catch it.
+    const sut = makeTools({
+      bills: [billRow({ period_status: 'open' })],
+      billsAfterPreview: [
+        billRow({ period_status: 'open', stamped_trace_count: 9 }),
+      ],
+    });
+    const confirmation_token = await tokenFrom(sut);
+
+    const outcome = await sut.close.run(
+      { ...JUNE, confirmation_token },
+      TEST_CALLER,
+    );
+
+    expect(outcome.ok ? '' : outcome.error.code).toBe('STALE_PERIOD');
     expect(sut.closes).toEqual([]);
   });
 

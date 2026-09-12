@@ -85,7 +85,8 @@ export const billingTools = (
     name: 'get_billing_series',
     title: 'Cost over time',
     description:
-      'Ready-to-plot series: monthly history (up to 24 months) or the last days (up to 90, today included and marked partial), split by token type, agent and model.',
+      'Ready-to-plot series: monthly history (up to 24 months) or the last days (up to 90, today included and marked partial), split by token type, agent and model. ' +
+      'Pass the window size that belongs to the granularity — `months` with granularity month, `days` with granularity day. The other one is refused, not ignored.',
     inputSchema: seriesArgs,
     outputSchema: billingSeriesResponseSchema,
     annotations: READ_ONLY,

@@ -66,6 +66,12 @@ describe('MCP wiring (decisions 175/176/179)', () => {
 
   it('MUST build the confirmation codec from the configured key only', () => {
     expect(factory).toContain('makeNodeConfirmationCodec(confirmationKey)');
-    expect(factory).not.toMatch(/makeNodeConfirmationKey\(['"]/);
+    // The negative half used to match `makeNodeConfirmationKey(` — a name that
+    // exists nowhere in the repo, so it could never fail. It now names the REAL
+    // function and refuses any literal argument: a dev fallback key hardcoded
+    // here would sign confirmation tokens with a value anyone can read.
+    const calls = factory.match(/makeNodeConfirmationCodec\([^)]*\)/g) ?? [];
+
+    expect(calls).toEqual(['makeNodeConfirmationCodec(confirmationKey)']);
   });
 });

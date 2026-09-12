@@ -107,7 +107,11 @@ const FULL_ARGS: Record<string, Record<string, unknown>> = {
   get_session: {},
   list_bills: {},
   get_billing_summary: { year: 2026, month: 6 },
-  get_billing_series: { granularity: 'day', months: 12, days: 30 },
+  // Legal by the endpoint's cross-field rule: `days` belongs to granularity
+  // day, `months` to granularity month — sending the other is a 400, not an
+  // ignored parameter. (The schema alone cannot express that, which is why the
+  // integration suite exercises both spellings.)
+  get_billing_series: { granularity: 'day', days: 30 },
   get_billing_projection: {},
   export_statement: { year: 2026, month: 6, format: 'html' },
   list_prices: { model: 'openai/gpt-5-mini', token_type: 'input' },

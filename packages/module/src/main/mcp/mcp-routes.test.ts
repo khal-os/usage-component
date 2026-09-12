@@ -26,6 +26,10 @@ import { routeDbHarness } from '../server/routes/v1/helpers/route-db-harness.js'
 import { makeMcpRuntimeFrom } from '../factories/mcp-factory.js';
 import { registerMcpRoutes } from './mcp-routes.js';
 
+/** The same whitelist guard every /api/v1 route suite applies (invariant 4). */
+const FORBIDDEN_INTERNAL_KEYS =
+  /marketPriceUsd|ptaxReference|markupPercent|Microcents|microcents|"_id"/;
+
 const MASTER: SessionClaims = {
   subject: 'user_01',
   role: 'master',
@@ -272,6 +276,45 @@ describe('POST /mcp', () => {
       expect(result?.content?.[0]?.text).toContain('validation');
     });
 
+    it.each([
+      [
+        'the daily window',
+        { granularity: 'day', days: 7 },
+        '/api/v1/billing/series?granularity=day&days=7',
+      ],
+      [
+        'the monthly window',
+        { granularity: 'month', months: 3 },
+        '/api/v1/billing/series?granularity=month&months=3',
+      ],
+    ])(
+      'get_billing_series MUST answer %s exactly as its route does',
+      async (_case, args, path) => {
+        const [viaTool, viaHttp] = await Promise.all([
+          call('get_billing_series', args),
+          request(app).get(path).expect(200),
+        ]);
+
+        expect(JSON.stringify(viaTool?.structuredContent)).toBe(viaHttp.text);
+      },
+    );
+
+    it('MUST relay the cross-field rule of the series endpoint instead of dropping a window', async () => {
+      // `months` belongs to granularity month: the endpoint refuses it rather
+      // than silently answering a different window, and the tool has to relay
+      // that refusal by name so a model can fix the call.
+      const result = await call('get_billing_series', {
+        granularity: 'day',
+        months: 3,
+      });
+
+      expect(result?.isError).toBe(true);
+      expect(errorOf(result)).toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid parameter: months',
+      });
+    });
+
     it('MUST map a value the CONTROLLER refuses to INVALID_INPUT naming the field', async () => {
       const result = await call('list_traces', { from: 'yesterday' });
 
@@ -289,23 +332,103 @@ describe('POST /mcp', () => {
       expect(errorOf(result)).toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('MUST return the statement as an embedded document', async () => {
+    it('MUST return the statement as an embedded document, named as the route names it', async () => {
       const result = await call('export_statement', {
         year: 2026,
         month: 6,
         format: 'csv',
       });
 
-      expect(result?.structuredContent).toMatchObject({
+      expect(result?.structuredContent).toEqual({
+        year: 2026,
+        month: 6,
         format: 'csv',
         media_type: 'text/csv',
+        filename: 'extrato-2026-06.csv',
+        uri: 'usage://statement/extrato-2026-06.csv',
       });
       expect(result?.content?.[1]?.resource).toMatchObject({
+        uri: 'usage://statement/extrato-2026-06.csv',
         mimeType: 'text/csv',
       });
-      expect(String(result?.content?.[1]?.resource?.['text'])).toContain(
-        'Extrato mensal',
+
+      const document = String(result?.content?.[1]?.resource?.['text']);
+
+      expect(document).toContain('Extrato mensal');
+      // The BOM belongs to a download, not to text a client renders.
+      expect(document.startsWith('\uFEFF')).toBe(false);
+      expect(document.startsWith('Extrato mensal')).toBe(true);
+    });
+
+    it('MUST take the filename FROM the route, which is how the PARCIAL mark survives', async () => {
+      // A fully-past month's filename is identical to the hand-built fallback,
+      // so only a PARTIAL month proves the header is read at all: the current
+      // month is watermarked and the route names the file accordingly.
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth() + 1;
+      const result = await call('export_statement', {
+        year,
+        month,
+        format: 'csv',
+      });
+
+      const stem = `extrato-${String(year)}-${String(month).padStart(2, '0')}-PARCIAL.csv`;
+
+      expect(result?.structuredContent?.['filename']).toBe(stem);
+      expect(result?.structuredContent?.['uri']).toBe(
+        `usage://statement/${stem}`,
       );
+      expect(String(result?.content?.[1]?.resource?.['text'])).toContain(
+        'PARCIAL',
+      );
+    });
+
+    it('MUST keep internal fields out of EVERY tool result (invariant 4), previews included', async () => {
+      // The /api/v1 suites apply this guard per endpoint; the MCP door publishes
+      // eight projections of its own (the write results, the three previews, the
+      // overview, the export envelope) that no route publishes — without this, a
+      // microcents or markup leak on those would ship with a green suite.
+      const calls: [string, Record<string, unknown>][] = [
+        ['get_overview', {}],
+        ['list_traces', { page_size: 3 }],
+        ['get_trace_filter_options', {}],
+        ['list_sessions', { page_size: 3 }],
+        ['get_session_filter_options', {}],
+        ['list_bills', {}],
+        ['get_billing_summary', { year: 2026, month: 6 }],
+        ['get_billing_series', { granularity: 'month', months: 2 }],
+        ['get_billing_projection', {}],
+        ['list_prices', {}],
+        ['export_statement', { year: 2026, month: 6, format: 'csv' }],
+        [
+          'preview_register_price',
+          {
+            model: 'meta/llama-4-scout',
+            token_type: 'input',
+            price_brl_per_million: '1.50',
+            effective_from: '2026-06-15',
+          },
+        ],
+        ['preview_close_billing_period', { year: 2026, month: 6 }],
+        [
+          'preview_reopen_billing_period',
+          { year: 2026, month: 6, reason: 'conferência de auditoria' },
+        ],
+      ];
+
+      for (const [name, args] of calls) {
+        const result = await call(name, args);
+
+        // The tool name rides in the asserted value: jest takes no label, and a
+        // bare `toBeFalsy()` failure would not say WHICH of the fourteen broke.
+        expect(`${name} isError=${String(result?.isError ?? false)}`).toBe(
+          `${name} isError=false`,
+        );
+        expect(
+          `${name} ${JSON.stringify(result?.structuredContent)}`,
+        ).not.toMatch(FORBIDDEN_INTERNAL_KEYS);
+      }
     });
   });
   /**

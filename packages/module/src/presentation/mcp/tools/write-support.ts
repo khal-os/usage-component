@@ -55,15 +55,33 @@ export const periodId = (year: number, month: number): string =>
   `${String(year)}-${String(month).padStart(2, '0')}`;
 
 /**
- * The optimistic-lock stamp of a month: its lifecycle state and snapshot
- * version. A close that was previewed against an open month must refuse to
- * run once someone else closed it, and a reopen must refuse once the month
- * was re-closed — the same job `If-Match` does for a manifest.
+ * The optimistic-lock stamp of a month — the same job `If-Match` does for a
+ * manifest: a close previewed against an open month must refuse to run once
+ * someone else closed it, and a reopen must refuse once the month was
+ * re-closed.
+ *
+ * It covers the NUMBERS the preview showed, not just the lifecycle state, for
+ * two reasons. `/bills` reports `snapshot_version` only while a month is
+ * CLOSED, so a close → reopen cycle lands back on `open:v0` and a state-only
+ * stamp would let a stale token through. And a total that moved between
+ * preview and confirm (a straggler arriving in an open month) is exactly when
+ * the person who approved "freeze R$ X" has to look again — closing is the
+ * commitment, so the stamp is deliberately strict.
  */
 export const periodEtag = (row: BillRow | undefined): string =>
   row === undefined
     ? 'absent:v0'
-    : `${row.period_status}:v${String(row.snapshot_version ?? 0)}`;
+    : [
+        row.period_status,
+        `v${String(row.snapshot_version ?? 0)}`,
+        row.total_cost_brl,
+        `t${String(row.stamped_trace_count)}`,
+        `p${String(row.pending_trace_count)}`,
+      ].join(':');
+
+/** The oldest month the archive knows about — the floor of what can be closed. */
+export const earliestBill = (bills: readonly BillRow[]): BillRow | undefined =>
+  [...bills].sort((a, b) => a.year * 12 + a.month - (b.year * 12 + b.month))[0];
 
 export const findBill = (
   bills: readonly BillRow[],
