@@ -20,8 +20,11 @@ const MAX_MONTHS = 24;
 const DEFAULT_DAYS = 30;
 const MAX_DAYS = 90;
 
-/** Strict (C-3): an unknown param is a 400, never silently ignored. */
-const seriesQuerySchema = z.strictObject({
+/**
+ * The shape is exported so the MCP tool of this endpoint (T12) declares the
+ * SAME parameters — one contract, two doors, never two spellings.
+ */
+export const seriesQueryShape = {
   granularity: z.enum(['month', 'day']).default('month'),
   // strictIntParam (audit D-6): decimal digits only — no hex/exponent
   // spellings the published integer contract does not admit.
@@ -29,7 +32,10 @@ const seriesQuerySchema = z.strictObject({
     .pipe(z.number().int().min(1).max(MAX_MONTHS))
     .optional(),
   days: strictIntParam.pipe(z.number().int().min(1).max(MAX_DAYS)).optional(),
-});
+};
+
+/** Strict (C-3): an unknown param is a 400, never silently ignored. */
+const seriesQuerySchema = z.strictObject(seriesQueryShape);
 
 export class GetBillingSeriesController implements Controller {
   private readonly getBillingSeries: GetBillingSeriesUseCase;
