@@ -181,6 +181,29 @@ describe('CORS preflight (decision 174)', () => {
       'https://console.example',
     );
     expect(response.headers['access-control-max-age']).toBeUndefined();
+    // Decision 182: the statement export's filename (Content-Disposition,
+    // PARCIAL mark included) is readable by cross-origin JS — exactly that
+    // one header, never `*`.
+    expect(response.headers['access-control-expose-headers']).toBe(
+      'Content-Disposition',
+    );
+  });
+
+  it('MUST NOT expose Content-Disposition to an unlisted origin — audit D-1 silence covers the expose header too (decision 182)', async () => {
+    const response = await request(appWith('https://console.example'))
+      .get('/probe')
+      .set('Origin', 'https://evil.example')
+      .expect(200);
+
+    expect(response.headers['access-control-expose-headers']).toBeUndefined();
+  });
+
+  it('MUST NOT emit the expose header on a same-origin request (no Origin) — decision 182', async () => {
+    const response = await request(appWith('https://console.example'))
+      .get('/probe')
+      .expect(200);
+
+    expect(response.headers['access-control-expose-headers']).toBeUndefined();
   });
 
   it('MUST keep a non-CORS OPTIONS (no Origin) falling through to routing', async () => {

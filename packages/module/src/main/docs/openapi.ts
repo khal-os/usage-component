@@ -479,7 +479,11 @@ export const buildOpenApiDocument = (clientName?: string) => ({
             description:
               'A representação escolhida por ?format — text/csv (attachment, ' +
               'UTF-8 com BOM) ou text/html imprimível. O header Accept é ' +
-              'ignorado; format decide (audit D-5).',
+              'ignorado; format decide (audit D-5). O CSV sai com ' +
+              'Content-Disposition: attachment; ' +
+              'filename="extrato-YYYY-MM[-PARCIAL].csv" — o nome do arquivo ' +
+              'é a palavra do servidor, exposto a JS cross-origin via ' +
+              'Access-Control-Expose-Headers (decisão 182).',
             content: {
               'text/csv': { schema: { type: 'string' } },
               'text/html': { schema: { type: 'string' } },
