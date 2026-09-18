@@ -78,13 +78,17 @@ imports count as the layer they name (`@observability/core/<layer>/…`).
    display zone; snapshots record their zone, changes are forward-only).
    Current month is always partial and
    must be labeled so. A month closes (T6) only when fully past, via the
-   audited close flow — the runbook, or the opt-in auto-close sidecar
-   (decision 131; both through the ONE use case, `trigger` recorded); a
-   closed month is served exclusively from its immutable snapshot — never
-   recomputed.
+   audited close flow — the runbook, the opt-in auto-close sidecar
+   (decision 131), or the session-authenticated, master-only MCP tool pair
+   (decision 179, which amends 87: preview → confirm, `trigger: 'mcp'` and
+   the caller's `actor` recorded). All three go through the ONE use case, and
+   `trigger` says which door; a closed month is served exclusively from its
+   immutable snapshot — never recomputed.
 9. **Prices are versioned data** (no admin UI in v1), registered via
-   `POST /api/v1/prices` or the `price:insert` runbook job — both share ONE
-   use case (canonical model key + immediate reprocess, decisions 82/57/83).
+   `POST /api/v1/prices`, the `price:insert` runbook job, or the MCP
+   `preview_register_price` → `register_price` pair (decision 178) — all
+   share ONE use case (canonical model key + immediate reprocess, decisions
+   82/57/83).
    Versions are immutable — changes are new inserts with `effective_from`;
    duplicates answer 409; the model list is data, not code. How a price's R$
    is RESOLVED is a declared, dispatched property (`pricingType`, decision
@@ -143,7 +147,15 @@ preflight also bypasses), and `GET /health`, open by platform convention
 browser probe — registered after CORS, before the gate). Preflights from
 ALLOWED origins are answered 204 by the CORS middleware itself (decision
 174); unlisted origins still get no CORS answer at all. Identity-only, no scopes (ADR-95) — the module
-holds no scope logic, a platform invariant, not an omission. The retired
+holds no scope logic, a platform invariant, not an omission.
+
+The MCP endpoint (T12, decisions 175–180) is a SECOND door with its own gate,
+mounted after CORS and before the `/api/v1` gate: `POST /mcp` exists only when
+`MCP_CANONICAL_URL` is set, and it verifies the session token STRICTLY against
+`MCP_AUDIENCE` (not the audience-tolerant list above), the `tenant` claim and
+`roles === 'master'`, answering 401 with the RFC 9728 challenge and 403 without
+one. Its tools call the same controllers the routes do; its writes are
+preview → confirm pairs signed with `MCP_CONFIRMATION_KEY`. The retired
 names (the discovery quartet, the interim `BASIC_AUTH_*` gate of decision
 141) have NO aliases. Nothing configured → API open (PoC behavior, loud
 warn at boot).

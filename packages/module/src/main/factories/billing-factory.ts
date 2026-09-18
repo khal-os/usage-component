@@ -66,13 +66,15 @@ export const makeExportStatementController = (): ExportStatementController =>
   });
 
 /**
- * The ONE close path (decisions 87 + 131): the runbook job composes it
+ * The ONE close path (decisions 87 + 131 + 179): the runbook job composes it
  * with the default 'runbook' trigger, the auto-close scheduler with
- * 'scheduled' — the trigger is the door's identity in the audit trail,
- * never a per-call choice.
+ * 'scheduled', the MCP tool with 'mcp' plus the session subject as `actor`
+ * — the trigger is the door's identity in the audit trail, never a per-call
+ * choice.
  */
 export const makeCloseBillingPeriodUseCase = (
   trigger: BillingLifecycleTrigger = 'runbook',
+  actor?: string,
 ): CloseBillingPeriodDbUseCase =>
   new CloseBillingPeriodDbUseCase({
     billingQueryRepository: new MongoDbBillingQueryRepository(),
@@ -84,13 +86,19 @@ export const makeCloseBillingPeriodUseCase = (
     // Post-close quarantine reconciliation (audit B-1, decision 100).
     traceRepository: new MongoDbTraceRepository({ logger: billingLogger }),
     trigger,
+    ...(actor !== undefined && { actor }),
   });
 
-export const makeReopenBillingPeriodUseCase =
-  (): ReopenBillingPeriodDbUseCase =>
-    new ReopenBillingPeriodDbUseCase({
-      billingPeriodRepository: new MongoDbBillingPeriodRepository(),
-    });
+/** Same rule for the reopen door (decision 179): runbook by default, 'mcp' + actor from the tool. */
+export const makeReopenBillingPeriodUseCase = (
+  trigger: BillingLifecycleTrigger = 'runbook',
+  actor?: string,
+): ReopenBillingPeriodDbUseCase =>
+  new ReopenBillingPeriodDbUseCase({
+    billingPeriodRepository: new MongoDbBillingPeriodRepository(),
+    trigger,
+    ...(actor !== undefined && { actor }),
+  });
 
 /**
  * Decision 131 knobs, resolved once: env override or default — the same

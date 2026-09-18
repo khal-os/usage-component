@@ -41,14 +41,14 @@ extraEgress:
 # foi buildada, e renderizar `:latest` no lugar seria pior que nao renderizar.
 pins:
   usage-module:
-    digest: "sha256:0cbe68ca123569d4d40e17c537ad39472eb7bda4a1a9d9c0a1be9f3c13e484f0"
-    gitSha: "322c92a97dd32b348eba6ca00bd5e0d2e6bc2bf1"
+    digest: "sha256:d17f4ed13760c8caa74ac9c9be8f1d820c527d43f9e19e5c0ca52490c318558c"
+    gitSha: "e7f69cdbaf54b1a61556e8a5a2acb273355cf98f"
   usage-connector:
-    digest: "sha256:324d35541248cb75cc46ad1ef947e5afce035d98dd9d9a55fc0454a5a321d64f"
-    gitSha: "322c92a97dd32b348eba6ca00bd5e0d2e6bc2bf1"
+    digest: "sha256:454973577c343db6ec1386a4cd2cbd75d66550b0230591ff694c299fafefab0c"
+    gitSha: "e7f69cdbaf54b1a61556e8a5a2acb273355cf98f"
   usage-db-backup:
-    digest: "sha256:badba2ee61789848cc281eacb393a9868218fdf7b074c15814b051d1e857eec2"
-    gitSha: "322c92a97dd32b348eba6ca00bd5e0d2e6bc2bf1"
+    digest: "sha256:07010dfe9b5871514dcd3445f159e29d27e021cfeed16b7a85eccd7b7178f914"
+    gitSha: "e7f69cdbaf54b1a61556e8a5a2acb273355cf98f"
 
 services:
   api:
@@ -65,6 +65,19 @@ services:
       # O parser aceita `https://*.<dominio>` e casa exatamente um label — nunca
       # `*` nu (audit D-1) e nunca http.
       CORS_ALLOWED_ORIGINS: https://hapvida-dev.khal.ai,https://*.hapvida.khal.ai
+      # ── Porta MCP (T12, decisoes 175-180) ──
+      # Opt-in: sem MCP_CANONICAL_URL nenhuma rota /mcp e montada. Com ela, o
+      # boot EXIGE KHAL_AUTH_URL + KHAL_TENANT (ja acima e no values base) e
+      # MCP_CONFIRMATION_KEY (>= 32 chars) — esta ultima vem do secret `app`
+      # via ExternalSecret (`dataFrom: extract` traz a chave inteira), porque a
+      # schema reprova literal em nome terminado em _KEY. PRE-REQUISITO: a
+      # chave tem de existir no secret ANTES deste merge, senao o pod da api
+      # recusa subir — a recusa e o comportamento desenhado, nao um bug.
+      MCP_CANONICAL_URL: https://api-dev.hapvida.khal.ai/mcp
+      # `aud` estrito do token de sessao no /mcp (nao entra na lista tolerante
+      # de KHAL_TOKEN_AUDIENCE). Derivado pelo khal-auth do module `usage` do
+      # Module Catalog: <module-id>-mcp (ADR-125).
+      MCP_AUDIENCE: usage-mcp
 
   trace-ingestion-worker:
     envOverride:

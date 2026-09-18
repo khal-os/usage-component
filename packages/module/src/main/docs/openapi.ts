@@ -190,6 +190,9 @@ const sessionFilterParams = [
   }),
 ];
 
+/** The component version, read from the one place that has it (C-4.1). */
+export const apiVersion = (): string => packageVersion();
+
 export const buildOpenApiDocument = (clientName?: string) => ({
   openapi: '3.1.0',
   info: {

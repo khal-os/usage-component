@@ -18,16 +18,24 @@ export type BillingPeriodLifecycleStatus = 'open' | 'closed';
 
 /**
  * Who opened the door: 'runbook' = a human-run job (decision 87);
- * 'scheduled' = the opt-in auto-close sidecar (decision 131). Reopen is
- * runbook-only — the scheduler never reopens and never re-closes a
+ * 'scheduled' = the opt-in auto-close sidecar (decision 131); 'mcp' = the
+ * session-authenticated, master-only MCP endpoint, where a preview was
+ * shown and confirmed by a person (decision 179) — that door also records
+ * WHO did it in `actor`. The scheduler never reopens and never re-closes a
  * reopened month.
  */
-export type BillingLifecycleTrigger = 'runbook' | 'scheduled';
+export type BillingLifecycleTrigger = 'runbook' | 'scheduled' | 'mcp';
 
 export interface BillingPeriodAuditEntry {
   at: Date;
   action: 'close' | 'reopen';
   trigger: BillingLifecycleTrigger;
+  /**
+   * WHO opened the door, when the door knows (decision 179): the `sub` of
+   * the session that called the MCP tool. Absent for 'runbook' (an operator
+   * at a terminal the process cannot identify) and for 'scheduled'.
+   */
+  actor?: string;
   /** Required on reopen (T6: audited) — absent on close. */
   reason?: string;
   /** The snapshot version the action produced (close) or set aside (reopen). */
