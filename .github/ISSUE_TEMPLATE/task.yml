@@ -1,0 +1,18 @@
+name: Task
+description: A concrete piece of work (chore, refactor, ops, docs)
+labels: ["chore", "triage"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be true when this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: checklist
+    attributes:
+      label: Checklist
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
