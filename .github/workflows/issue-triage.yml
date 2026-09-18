@@ -1,14 +1,46 @@
 name: Issue triage
 on:
   issues:
-    types: [opened, reopened]
+    types: [opened, reopened, labeled]
+  pull_request:
+    types: [opened, edited]
 permissions:
   issues: write
+  pull-requests: write
 jobs:
-  label:
+  issue-triage:
+    if: github.event_name == 'issues'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NUM: ${{ github.event.issue.number }}
+      REPO: ${{ github.repository }}
     steps:
-      - name: Ensure triage label
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue edit "${{ github.event.issue.number }}" -R "${{ github.repository }}" --add-label triage
+      - name: New issue gets triage label
+        if: github.event.action != 'labeled'
+        run: gh issue edit "$NUM" -R "$REPO" --add-label triage
+      - name: Priority label clears triage
+        if: github.event.action == 'labeled' && startsWith(github.event.label.name, 'p')
+        run: |
+          case "${{ github.event.label.name }}" in
+            p0|p1|p2) gh issue edit "$NUM" -R "$REPO" --remove-label triage ;;
+          esac
+  pr-type-label:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NUM: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+      TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      - name: Type label from conventional-commit prefix
+        run: |
+          case "$TITLE" in
+            fix*)                                   label=bug ;;
+            feat*)                                  label=feature ;;
+            docs*)                                  label=docs ;;
+            chore*|build*|refactor*|ci*|test*|perf*) label=chore ;;
+            *) echo "no matching prefix"; exit 0 ;;
+          esac
+          gh pr edit "$NUM" -R "$REPO" --add-label "$label"
