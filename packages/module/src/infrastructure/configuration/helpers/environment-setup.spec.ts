@@ -25,6 +25,9 @@ const loadEnvironment = async (
   delete process.env.KHAL_AUTH_URL;
   delete process.env.KHAL_TENANT;
   delete process.env.KHAL_TOKEN_AUDIENCE;
+  delete process.env.MCP_CANONICAL_URL;
+  delete process.env.MCP_CONFIRMATION_KEY;
+  delete process.env.MCP_AUDIENCE;
   Object.assign(process.env, overrides);
 
   jest.resetModules();
@@ -110,5 +113,129 @@ describe('environment-setup', () => {
       expect(environment.khalAuthUrl).toBeUndefined();
       expect(environment.khalTenant).toBeUndefined();
     });
+  });
+});
+
+describe('MCP_* (T12 — the endpoint is opt-in and all-or-nothing)', () => {
+  const MCP_ON = {
+    MCP_CANONICAL_URL: 'https://api-dev.example.com/mcp',
+    MCP_CONFIRMATION_KEY: 'x'.repeat(32),
+    MCP_AUDIENCE: 'usage-mcp',
+    KHAL_AUTH_URL: 'https://auth-dev.example.com',
+    KHAL_TENANT: 'acme',
+  };
+
+  /**
+   * The fatal path exits the process, so a refusal is asserted by the exit
+   * itself. stdout is muted: the boot's last words are a real log line, not
+   * suite noise.
+   */
+  const expectRefusedBoot = async (
+    overrides: Record<string, string>,
+  ): Promise<void> => {
+    const exit = jest.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit');
+    }) as never);
+    const write = jest
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      await expect(loadEnvironment(overrides)).rejects.toThrow('process.exit');
+      expect(exit).toHaveBeenCalledWith(1);
+    } finally {
+      write.mockRestore();
+      exit.mockRestore();
+    }
+  };
+
+  it('MUST leave every MCP knob undefined when the endpoint is not configured', async () => {
+    const environment = await loadEnvironment();
+
+    expect(environment.mcpCanonicalUrl).toBeUndefined();
+    expect(environment.mcpConfirmationKey).toBeUndefined();
+    expect(environment.mcpAudience).toBeUndefined();
+  });
+
+  it('MUST pass the whole set through when the endpoint IS configured', async () => {
+    const environment = await loadEnvironment(MCP_ON);
+
+    expect(environment.mcpCanonicalUrl).toBe('https://api-dev.example.com/mcp');
+    expect(environment.mcpAudience).toBe('usage-mcp');
+    expect(environment.mcpConfirmationKey).toBe('x'.repeat(32));
+  });
+
+  it("MUST treat '' (compose `${VAR:-}` defaults) exactly like unset", async () => {
+    const environment = await loadEnvironment({
+      MCP_CANONICAL_URL: '',
+      MCP_CONFIRMATION_KEY: '',
+      MCP_AUDIENCE: '',
+    });
+
+    expect(environment.mcpCanonicalUrl).toBeUndefined();
+  });
+
+  it('MUST boot happily with a provisioned key and NO endpoint (the secret exists per environment)', async () => {
+    const environment = await loadEnvironment({
+      MCP_CONFIRMATION_KEY: 'y'.repeat(40),
+    });
+
+    expect(environment.mcpCanonicalUrl).toBeUndefined();
+    expect(environment.mcpConfirmationKey).toBe('y'.repeat(40));
+  });
+
+  it('MUST refuse the boot when the endpoint has no session issuer (MCP is never open)', async () => {
+    const {
+      KHAL_AUTH_URL: _url,
+      KHAL_TENANT: _tenant,
+      ...withoutAuth
+    } = MCP_ON;
+
+    await expectRefusedBoot(withoutAuth);
+  });
+
+  it('MUST refuse the boot when the endpoint has no tenant', async () => {
+    const { KHAL_TENANT: _tenant, ...withoutTenant } = MCP_ON;
+
+    await expectRefusedBoot(withoutTenant);
+  });
+
+  it('MUST refuse the boot with no audience — a guessed audience is a wrong door', async () => {
+    const { MCP_AUDIENCE: _audience, ...withoutAudience } = MCP_ON;
+
+    await expectRefusedBoot(withoutAudience);
+  });
+
+  it('MUST refuse the boot with no confirmation key — writes would have no lock', async () => {
+    const { MCP_CONFIRMATION_KEY: _key, ...withoutKey } = MCP_ON;
+
+    await expectRefusedBoot(withoutKey);
+  });
+
+  it('MUST refuse a confirmation key shorter than 32 characters', async () => {
+    await expectRefusedBoot({ ...MCP_ON, MCP_CONFIRMATION_KEY: 'short-key' });
+  });
+
+  it.each([
+    ['a path that is not /mcp', 'https://api-dev.example.com/api/v1/mcp'],
+    ['no path at all', 'https://api-dev.example.com'],
+    ['a non-http scheme', 'ftp://api-dev.example.com/mcp'],
+    ['something that is not a url', 'api-dev.example.com/mcp'],
+  ])(
+    'MUST refuse a canonical url with %s (it IS the resource identifier)',
+    async (_case, url) => {
+      await expectRefusedBoot({ ...MCP_ON, MCP_CANONICAL_URL: url });
+    },
+  );
+
+  it('MUST accept a trailing slash on the canonical url', async () => {
+    const environment = await loadEnvironment({
+      ...MCP_ON,
+      MCP_CANONICAL_URL: 'https://api-dev.example.com/mcp/',
+    });
+
+    expect(environment.mcpCanonicalUrl).toBe(
+      'https://api-dev.example.com/mcp/',
+    );
   });
 });
