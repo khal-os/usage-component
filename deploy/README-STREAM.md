@@ -63,7 +63,7 @@ deploy/
   verify-argo.sh                o gate: Synced+Healthy+revisao da source DESTE repo (multi-source, D14)
                                 +CONJUNTO de digests de pod permanente, sem skip (D10)
   bootstrap-eks-repo.sh         branches eks/*, vars, Environment prod-eks, auditoria (dry-run)
-  __tests__/                    5 suites, 260 asserces (run-all.sh)
+  __tests__/                    6 suites, 279 asserces (run-all.sh)
     fixtures/                   pins validos + 8 fixtures INVALIDAS (uma por forma de errar)
 .github/workflows/
   eks-ci.yml                    contrato do chart + scripts + actionlint + gitleaks
@@ -290,6 +290,25 @@ PENDENTE-13.
 mao em `-1` calado. Teste de render nos tres ambientes: hook, delete-policy,
 `Orphan`, `Retain`, wave do ES **estritamente menor** que a do Job, e o Job
 apontando para aquele mesmo Secret.
+
+**D16 — the §0.1 guard survives squash promotions (2026-09-18).**
+The repo only allows squash merges, lane promotions included. A commit that
+reaches `eks/dev` from `main` by a real merge (e.g. `9eba23c`, #69, which touched
+`.github/workflows/docker.yml`) stays an ancestor of `eks/dev`, but the
+`eks/dev → eks/homolog → eks/main` promotions carry it as squashed content only.
+The merge-base with `main` then predates it, and the three-dot diff reported
+`M .github/workflows/docker.yml` on `eks/homolog` and `eks/main` although the
+file was byte-identical to `origin/main` (red on `eks/main` since `0db5b43`,
+2026-09-02). The three-dot list stays as the CANDIDATE set, so `main`'s own
+evolution still never shows up, and a candidate is reported only when its
+content at `HEAD` also differs from `origin/main` (absent on both sides counts
+as equal). A file the eks side really changed still fails. The guard lives in
+`deploy/__tests__/_ecs-guard.sh`; `ecs-guard.test.sh` builds that exact history
+(merge into `eks/dev`, squash into `eks/homolog`) and proves both directions,
+and the guard now FAILS instead of passing silently when `main...HEAD` has no
+merge-base. Known gap: if `main` changes a blocklisted file again before the
+next promotion carries it, the lanes still hold the older `main` version and the
+guard reports it until that promotion lands.
 
 ---
 

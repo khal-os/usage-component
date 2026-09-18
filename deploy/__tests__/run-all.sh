@@ -8,7 +8,7 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 FALHAS=0
-for t in services chart-contract gitops-pin verify-argo lanes; do
+for t in services chart-contract gitops-pin verify-argo ecs-guard lanes; do
   printf '\n############ %s ############\n' "$t"
   bash "${DIR}/${t}.test.sh" || FALHAS=$((FALHAS + 1))
 done
