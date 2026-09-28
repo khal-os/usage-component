@@ -70,10 +70,19 @@ services:
       MCP_AUDIENCE: usage-mcp
 
   trace-ingestion-worker:
+    # Incident 2026-09-28: OOM-crashloop since 09-18 — Node's default heap
+    # (~512Mi) burst on the first batch while the container had 1Gi. A bigger
+    # preset does NOT resize the Node heap by itself: preset and NODE_OPTIONS
+    # move TOGETHER (heap ~75% of the limit). A batch is 1000 traces + ALL
+    # their spans with LLM content in one page, with no byte ceiling; 100
+    # keeps the page small until byte-bounded paging lands.
+    preset: L
     envOverride:
       ENVIRONMENT: production
       MONGO_USAGE_DB_NAME: usage_db
       LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch.svc.cluster.local:8123
+      NODE_OPTIONS: --max-old-space-size=1536
+      TRACE_INGESTION_BATCH_SIZE: 100
     extraEgress:
       - namespace: kos-langwatch
         ports:
