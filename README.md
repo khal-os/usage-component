@@ -311,13 +311,14 @@ then ingested by the real sync with prices stamped at write time.
 produces the three richer PoC profiles (hapvida/claro/vivo);
 `--client <name> [--traces N]` produces any client's generic set.
 
-## Client UI (inside the deployment)
+## Client UI (retired — lives in khal-platform)
 
-nginx serves `packages/ui` and reverse-proxies `/api` to that client's api
-service — same origin, no client selector, no addresses in the UI. The
-header shows the deployment's client name via `/client.json`, which nginx
-templates from `CLIENT_NAME` at container start (the image stays
-client-agnostic).
+The in-repo `packages/ui` (nginx same-origin, `/api` reverse proxy) was
+removed by decision 144. The UI is now the khal-platform billing SPA, served
+on its OWN origin in every lane and talking to this API cross-origin with
+the session Bearer — which is why anything here must never assume a
+same-origin, auth-less browser (that assumption is exactly what broke the
+statement export, decision 182).
 
 ## Operational notes
 

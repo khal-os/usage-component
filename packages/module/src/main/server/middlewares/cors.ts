@@ -30,8 +30,10 @@ import { config } from '../../../infrastructure/index.js';
  * `String.endsWith` — not the look-alike `https://evil-example.com`.
  *
  * Auth is `Authorization: Bearer` (no cookies, no Allow-Credentials): the
- * JWT is the security boundary. CORS only ever mattered for the OPEN-API
- * posture, which stays locked.
+ * JWT is the security boundary. The billing SPA reads this API cross-origin
+ * with that Bearer in every deployed lane (billing-dev.hapvida.khal.ai →
+ * api-dev.hapvida.khal.ai and siblings), so the allowed branch is a live
+ * contract, not just the locked-down OPEN-API posture.
  *
  * Preflights (decision 174): a request with an Authorization header makes
  * the browser send OPTIONS first, and the fetch spec requires a 2xx back.
@@ -124,6 +126,13 @@ export const buildCorsMiddleware = (rawAllowedOrigins: string) => {
       res.set('access-control-allow-origin', origin);
       res.set('access-control-allow-methods', 'GET,POST');
       res.set('access-control-allow-headers', 'Content-Type, Authorization');
+      // Decision 182: the statement export (US17) is an authenticated
+      // cross-origin fetch, and the CSV's filename — PARCIAL mark included
+      // (invariant 8) — is the server's word in Content-Disposition. Every
+      // header beyond the CORS safelist is invisible to cross-origin JS, so
+      // expose EXACTLY this one; never `*` — cross-origin reach stays an
+      // explicit, minimal act (audit D-1).
+      res.set('access-control-expose-headers', 'Content-Disposition');
     }
 
     // Caches must never serve one origin's answer to another.
