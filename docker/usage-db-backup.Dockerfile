@@ -16,7 +16,11 @@
 # delete the ignore line.
 FROM debian:13-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates unzip \
+# dist-upgrade pulls the base image's pending security fixes (e.g. perl-base
+# 5.40.1-6+deb13u1, CVE-2026-13221/42496/8376) without waiting for a new
+# debian:13-slim tag.
+RUN apt-get update && apt-get dist-upgrade -y \
+  && apt-get install -y --no-install-recommends curl ca-certificates unzip \
   && curl -fsSL https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian13-x86_64-100.18.0.deb \
        -o /tmp/tools.deb \
   && apt-get install -y /tmp/tools.deb \
