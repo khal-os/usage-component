@@ -74,15 +74,18 @@ services:
     # (~512Mi) burst on the first batch while the container had 1Gi. A bigger
     # preset does NOT resize the Node heap by itself: preset and NODE_OPTIONS
     # move TOGETHER (heap ~75% of the limit). A batch is 1000 traces + ALL
-    # their spans with LLM content in one page, with no byte ceiling; 100
-    # keeps the page small until byte-bounded paging lands.
+    # their spans with LLM content in one page, with no byte ceiling; the
+    # page cap below keeps memory bounded until byte-bounded paging lands.
+    # 500 (not the old 1000) drains the ~224k-trace backlog ~5x faster and
+    # was sized against the 1536Mi heap: the crash was 1000-trace pages vs
+    # a 512Mi default heap.
     preset: L
     envOverride:
       ENVIRONMENT: production
       MONGO_USAGE_DB_NAME: usage_db
       LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch.svc.cluster.local:8123
       NODE_OPTIONS: --max-old-space-size=1536
-      TRACE_INGESTION_BATCH_SIZE: 100
+      TRACE_INGESTION_BATCH_SIZE: 500
     extraEgress:
       - namespace: kos-langwatch
         ports:
