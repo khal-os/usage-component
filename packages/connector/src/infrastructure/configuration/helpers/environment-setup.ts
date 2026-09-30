@@ -128,6 +128,10 @@ const envSchema = z
       'REPROCESS_INTERVAL_SECONDS',
       604_800,
     ),
+    REPROCESS_MAX_TRACES_PER_CYCLE: optionalBoundedIntString(
+      'REPROCESS_MAX_TRACES_PER_CYCLE',
+      100_000,
+    ),
   })
   .transform((env) => ({
     ...env,
@@ -143,6 +147,9 @@ const envSchema = z
         : undefined,
     REPROCESS_INTERVAL_SECONDS: env.REPROCESS_INTERVAL_SECONDS
       ? parseInt(env.REPROCESS_INTERVAL_SECONDS, 10)
+      : undefined,
+    REPROCESS_MAX_TRACES_PER_CYCLE: env.REPROCESS_MAX_TRACES_PER_CYCLE
+      ? parseInt(env.REPROCESS_MAX_TRACES_PER_CYCLE, 10)
       : undefined,
   }));
 
@@ -205,5 +212,6 @@ export const environment: EnvironmentVariables = {
   traceIngestionQuietPeriodSeconds:
     safeEnvironment.TRACE_INGESTION_QUIET_PERIOD_SECONDS,
   reprocessIntervalSeconds: safeEnvironment.REPROCESS_INTERVAL_SECONDS,
+  reprocessMaxTracesPerCycle: safeEnvironment.REPROCESS_MAX_TRACES_PER_CYCLE,
   ...toLoggingEnvironment(safeEnvironment, environmentContext),
 };

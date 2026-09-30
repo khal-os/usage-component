@@ -5,6 +5,9 @@ import {
   TraceModel,
 } from '../../domain/models/trace-model.js';
 import { ModelRef } from '../../domain/models/model-ref.js';
+import { PendingPriceCursor } from '../../domain/models/pending-price-cursor.js';
+
+export type { PendingPriceCursor };
 
 /**
  * The slim shape of the pending sweep (decision 79): exactly what
@@ -19,10 +22,22 @@ export interface PendingPriceTrace {
   tokens: TokenCounts;
 }
 
-/** Page cursor for findPendingPrice — the read's own sort tuple. */
-export interface PendingPriceCursor {
-  startedAt: Date;
-  traceId: string;
+/**
+ * Narrows a findPendingPrice page (decision 183). `model` keeps only traces
+ * served by that model — the price-registration door stamps what its new
+ * price unblocks instead of the oldest page of the whole queue.
+ * `withModelOnly` drops traces with no model: no price can ever stamp them,
+ * only an attribution correction can, so a sweep walking them is wasted.
+ * Both are residual filters on pricingStatus_1_startedAt_1 — no index of
+ * their own, so Mongo FETCHES every pending document between the cursor and
+ * the next match to evaluate them, embedded payload included. Cheap while
+ * the pending queue is small (5 traces on 2026-09-30); revisit with a
+ * compound index if it ever grows back past a few thousand model-less or
+ * other-model traces.
+ */
+export interface PendingPriceFilter {
+  model?: ModelRef;
+  withModelOnly?: boolean;
 }
 
 /**
@@ -136,11 +151,13 @@ export interface TraceRepository {
    * Callers page on the (startedAt, traceId) tuple cursor — `after`
    * walks FORWARD past traces the page could not move (blocked closed
    * months, still-pending), so a head-of-line clog of unstampable traces
-   * never starves the stampable ones behind it.
+   * never starves the stampable ones behind it. `filter` narrows the page
+   * (decision 183); the cursor keeps the same meaning with or without it.
    */
   findPendingPrice(
     limit: number,
     after?: PendingPriceCursor,
+    filter?: PendingPriceFilter,
   ): Promise<PendingPriceTrace[]>;
 
   /** Cheap indexed count of pending_price traces (audit B-5 — the honest "how much is left"). */

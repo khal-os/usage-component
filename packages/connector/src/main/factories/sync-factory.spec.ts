@@ -123,3 +123,24 @@ describe('makeTraceSourceClient (decision 127 — declared, never inferred)', ()
     expect(() => makeTraceSourceClient()).toThrow(/TRACE_SOURCE=fixtures/);
   });
 });
+
+describe('traceIngestionWorkerSettings — sweep chunk size (decision 183)', () => {
+  afterEach(() => {
+    jest.dontMock('../../infrastructure/index.js');
+    jest.dontMock('./logger-factory.js');
+  });
+
+  it('MUST default to 500 — one page, sized to fit the heartbeat window under contention', async () => {
+    const { traceIngestionWorkerSettings } = await loadFactory({});
+
+    expect(traceIngestionWorkerSettings.reprocessMaxTracesPerCycle).toBe(500);
+  });
+
+  it('MUST honor REPROCESS_MAX_TRACES_PER_CYCLE when set', async () => {
+    const { traceIngestionWorkerSettings } = await loadFactory({
+      reprocessMaxTracesPerCycle: 2_000,
+    });
+
+    expect(traceIngestionWorkerSettings.reprocessMaxTracesPerCycle).toBe(2_000);
+  });
+});

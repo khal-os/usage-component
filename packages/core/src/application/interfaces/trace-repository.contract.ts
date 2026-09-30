@@ -505,6 +505,66 @@ export const runTraceRepositoryContract = (
           'trace-pending-2',
         ]);
       });
+
+      it('MUST page strictly after the (startedAt, traceId) cursor, ties broken by traceId', async () => {
+        const tie = new Date('2026-06-08T00:00:00.000Z');
+        for (const traceId of ['trace-b', 'trace-a', 'trace-c']) {
+          await harness.repository.insertIfAbsent(
+            makePending({ traceId, startedAt: tie }),
+          );
+        }
+        await harness.repository.insertIfAbsent(
+          makePending({
+            traceId: 'trace-later',
+            startedAt: new Date('2026-06-09T00:00:00.000Z'),
+          }),
+        );
+
+        const page = await harness.repository.findPendingPrice(2, {
+          startedAt: tie,
+          traceId: 'trace-a',
+        });
+
+        expect(page.map((trace) => trace.traceId)).toEqual([
+          'trace-b',
+          'trace-c',
+        ]);
+      });
+
+      it('decision 183: MUST narrow to one model when filter.model is given', async () => {
+        await harness.repository.insertIfAbsent(
+          makePending({ traceId: 'trace-gpt' }),
+        );
+        await harness.repository.insertIfAbsent(
+          makePending({
+            traceId: 'trace-sonnet',
+            model: { id: 'claude-sonnet-4-6', provider: 'anthropic' },
+          }),
+        );
+
+        const page = await harness.repository.findPendingPrice(10, undefined, {
+          model: { id: 'claude-sonnet-4-6', provider: 'anthropic' },
+        });
+
+        expect(page.map((trace) => trace.traceId)).toEqual(['trace-sonnet']);
+      });
+
+      it('decision 183: MUST drop traces with no model when filter.withModelOnly is set', async () => {
+        await harness.repository.insertIfAbsent(
+          makePending({ traceId: 'trace-no-model', model: undefined }),
+        );
+        await harness.repository.insertIfAbsent(
+          makePending({ traceId: 'trace-with-model' }),
+        );
+
+        const page = await harness.repository.findPendingPrice(10, undefined, {
+          withModelOnly: true,
+        });
+
+        expect(page.map((trace) => trace.traceId)).toEqual([
+          'trace-with-model',
+        ]);
+      });
     });
   });
 };

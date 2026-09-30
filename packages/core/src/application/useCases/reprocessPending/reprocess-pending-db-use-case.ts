@@ -1,5 +1,7 @@
 import {
+  PendingPriceFilter,
   PriceVersionRepository,
+  ReprocessOptions,
   ReprocessPendingUseCase,
   ReprocessReport,
   TraceRepository,
@@ -51,7 +53,7 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
     this.logger = args.logger ?? nullLogger;
   }
 
-  async reprocess(options?: { maxTraces?: number }): Promise<ReprocessReport> {
+  async reprocess(options?: ReprocessOptions): Promise<ReprocessReport> {
     // re-audit 2026-08 (sync item 6): the SAME closed-month key rule as
     // ingestion, imported instead of re-derived — trace-ingestor already
     // called these shared, and two copies of a month key is exactly how
@@ -73,38 +75,56 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
     // POST /prices run a whole day of an unpriced model's backlog (~33k
     // traces, ~165k serial Mongo ops) inside one HTTP request; a proxy
     // timeout then aborted the response while the loop kept running.
-    // `maxTraces` caps a single run (the HTTP door passes it; the runbook
-    // job and the worker's sweep stay uncapped) — whatever a capped run
-    // leaves behind is reported honestly in pendingRemaining and drained
-    // by the worker's periodic sweep (decision 57's backstop).
+    // `maxTraces` caps a single run (the HTTP door and the worker's sweep
+    // pass it; the runbook job stays uncapped) — whatever a capped run
+    // leaves behind is reported honestly in pendingRemaining, and the
+    // capped run hands back `resumeAfter` so the next one continues from
+    // there instead of re-reading the head of the queue (decision 183).
     //
     // Pages walk the (startedAt, traceId) tuple FORWARD: traces a page
     // could not move (blocked closed month, still-pending, failed) are
     // walked PAST, never re-read at the head — a >page-size clog of
     // closed-month traces must not starve the stampable ones behind it.
     const cap = options?.maxTraces ?? Number.POSITIVE_INFINITY;
-    let after: PendingPriceCursor | undefined;
+    const filter: PendingPriceFilter = {
+      ...(options?.model ? { model: options.model } : {}),
+      ...(options?.onlyWithModel ? { withModelOnly: true } : {}),
+    };
+    let after: PendingPriceCursor | undefined = options?.after;
+    let reachedEnd = false;
 
     while (report.examined < cap) {
       const pageSize = Math.min(REPROCESS_PAGE_SIZE, cap - report.examined);
       const pendingTraces = await this.traceRepository.findPendingPrice(
         pageSize,
         after,
+        filter,
       );
 
-      if (pendingTraces.length === 0) break;
+      if (pendingTraces.length === 0) {
+        reachedEnd = true;
+        break;
+      }
 
       await this.reprocessPage(pendingTraces, closedMonths, report);
 
       const last = pendingTraces[pendingTraces.length - 1] as PendingPriceTrace;
       after = { startedAt: last.startedAt, traceId: last.traceId };
 
-      if (pendingTraces.length < pageSize) break;
+      if (pendingTraces.length < pageSize) {
+        reachedEnd = true;
+        break;
+      }
     }
+
+    // Stopped by the cap with a full last page: there may be more queue.
+    // When the cap lands exactly on the end, the next run reads one empty
+    // page and reports the end — harmless.
+    if (!reachedEnd && after) report.resumeAfter = after;
 
     report.pendingRemaining = await this.traceRepository.countPendingPrice();
 
-    this.logReport(report);
+    this.logReport(report, filter);
 
     return report;
   }
@@ -178,14 +198,23 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
     }
   }
 
-  private logReport(report: ReprocessReport): void {
+  private logReport(report: ReprocessReport, filter: PendingPriceFilter): void {
     this.logger.info('Reprocess pending: sweep finished', {
+      // Decision 183: examined/stamped count only this scope;
+      // pendingRemaining is always the whole queue.
+      scope: filter.model
+        ? modelKey(filter.model)
+        : filter.withModelOnly
+          ? 'with-model'
+          : 'all',
       examined: report.examined,
       stamped: report.stamped,
       stillPending: report.stillPending,
       failed: report.failed,
       blockedClosedMonth: report.blockedClosedMonth,
       pendingRemaining: report.pendingRemaining,
+      // Decision 183: false = capped mid-queue, the caller resumes from here.
+      reachedEnd: report.resumeAfter === undefined,
     });
   }
 }

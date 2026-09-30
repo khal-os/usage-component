@@ -23,6 +23,11 @@ const INGESTION_DEFAULTS = {
   batchSize: 1000,
   quietPeriodSeconds: 900, // decision 61: 15 min
   reprocessIntervalSeconds: 3600,
+  // Decision 183: one sweep chunk per worker cycle. Sized to the heartbeat
+  // window (2 × intervalSeconds + 120 = 240 s at the default): 500 traces
+  // take ~30 s on a quiet database and ~100 s at the ~300/min measured under
+  // contention on 2026-09-28, so the next ingestion batch always beats in time.
+  reprocessMaxTracesPerCycle: 500,
 } as const;
 
 // Decisão 59: com LANGWATCH_CLICKHOUSE_URL configurado, a fonte é o
@@ -142,6 +147,9 @@ export const traceIngestionWorkerSettings = {
   reprocessIntervalMs:
     (config.reprocessIntervalSeconds ??
       INGESTION_DEFAULTS.reprocessIntervalSeconds) * 1000,
+  reprocessMaxTracesPerCycle:
+    config.reprocessMaxTracesPerCycle ??
+    INGESTION_DEFAULTS.reprocessMaxTracesPerCycle,
 } as const;
 
 /**

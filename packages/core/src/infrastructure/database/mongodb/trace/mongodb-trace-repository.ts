@@ -5,6 +5,7 @@ import {
   QuarantineReconciliation,
   AttributionUpdateResult,
   PendingPriceCursor,
+  PendingPriceFilter,
   TraceAttribution,
   TraceRepository,
 } from '../../../../application/interfaces/trace-repository.js';
@@ -375,6 +376,7 @@ export class MongoDbTraceRepository implements TraceRepository {
   async findPendingPrice(
     limit: number,
     after?: PendingPriceCursor,
+    filter?: PendingPriceFilter,
   ): Promise<PendingPriceTrace[]> {
     // Slim projection (decision 79): re-stamping needs four small fields;
     // the embedded input/output/spans (decision 47) stay in the store.
@@ -400,6 +402,16 @@ export class MongoDbTraceRepository implements TraceRepository {
                 ],
               }
             : {}),
+          // Decision 183: residual filters on the same index. The model match
+          // uses the stored canonical shape (parseModelRef), the same one the
+          // stamper resolves prices from; `$ne: null` also drops a missing field.
+          ...(filter?.model
+            ? {
+                'model.id': filter.model.id,
+                'model.provider': filter.model.provider ?? null,
+              }
+            : {}),
+          ...(filter?.withModelOnly ? { model: { $ne: null } } : {}),
         },
         {
           projection: { _id: 0, traceId: 1, model: 1, startedAt: 1, tokens: 1 },
