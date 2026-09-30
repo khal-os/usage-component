@@ -146,3 +146,78 @@ describe('toBillingSummaryView — every displayed breakdown closes with the dis
     );
   });
 });
+
+describe('toBillingSummaryView — cache savings panel shows totals in cents and its arithmetic closes (T5, #111)', () => {
+  const withCacheSavings = (
+    cacheSavings: Partial<BillingSummary['statement']['cacheSavings']>,
+  ): BillingSummary => {
+    const summary = makeSummary();
+    summary.statement = {
+      ...summary.statement,
+      cacheSavings: {
+        ...summary.statement.cacheSavings,
+        ...cacheSavings,
+      },
+    };
+
+    return summary;
+  };
+
+  it('rounds the September 2026 hapvida figures to cents instead of printing µ¢', () => {
+    const view = toBillingSummaryView(
+      withCacheSavings({
+        cacheReadTokens: 5_060_231_464,
+        actualCacheReadCostMicrocents: 562_586_927_446,
+        counterfactualInputCostMicrocents: 5_625_869_305_420,
+        savingsMicrocents: 5_063_282_377_974,
+        cacheWriteCostMicrocents: 2_021_973_507,
+        netSavingsMicrocents: 5_061_260_404_467,
+      }),
+    );
+
+    expect(view.cache_savings.actual_cache_read_cost_brl_display).toBe(
+      'R$ 5.625,87',
+    );
+    expect(view.cache_savings.counterfactual_input_cost_brl_display).toBe(
+      'R$ 56.258,69',
+    );
+    expect(view.cache_savings.savings_brl_display).toBe('+ R$ 50.632,82');
+    expect(view.cache_savings.cache_write_cost_brl_display).toBe('R$ 20,22');
+    expect(view.cache_savings.net_savings_brl_display).toBe('+ R$ 50.612,60');
+    expect(view.cache_savings.net_positive).toBe(true);
+  });
+
+  it('derives savings and net from the DISPLAYED cents, so the on-screen sums close where independent rounding would not', () => {
+    // 1,6 ¢ actual and 3,4 ¢ counterfactual: independent rounding shows
+    // 0,02 and 0,03 but would print a 0,02 saving (exact 1,8 ¢) — the panel
+    // says "diferença entre os dois acima", so it must print 0,01.
+    const view = toBillingSummaryView(
+      withCacheSavings({
+        cacheReadTokens: 3_400,
+        actualCacheReadCostMicrocents: 1_600_000,
+        counterfactualInputCostMicrocents: 3_400_000,
+        savingsMicrocents: 1_800_000,
+        cacheWriteCostMicrocents: 1_500_000,
+        netSavingsMicrocents: 300_000,
+      }),
+    );
+    const cache = view.cache_savings;
+    const signedCents = (display: string): number =>
+      (display.startsWith('−') ? -1 : 1) * centsOf(display);
+
+    expect(cache.actual_cache_read_cost_brl_display).toBe('R$ 0,02');
+    expect(cache.counterfactual_input_cost_brl_display).toBe('R$ 0,03');
+    expect(signedCents(cache.savings_brl_display)).toBe(
+      centsOf(cache.counterfactual_input_cost_brl_display) -
+        centsOf(cache.actual_cache_read_cost_brl_display),
+    );
+    expect(signedCents(cache.net_savings_brl_display)).toBe(
+      signedCents(cache.savings_brl_display) -
+        centsOf(cache.cache_write_cost_brl_display),
+    );
+    // Net is displayed as −0,01 (0,01 − 0,02): the color flag follows what
+    // is shown, never the exact µ¢ that rounded to the other side.
+    expect(cache.net_savings_brl_display).toBe('− R$ 0,01');
+    expect(cache.net_positive).toBe(false);
+  });
+});
