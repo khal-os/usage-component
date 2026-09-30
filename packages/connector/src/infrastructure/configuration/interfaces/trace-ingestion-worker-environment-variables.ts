@@ -29,4 +29,6 @@ export interface TraceIngestionWorkerEnvironmentVariables {
   traceIngestionQuietPeriodSeconds?: number;
   /** Seconds between periodic reprocess sweeps in the worker (default 3600). */
   reprocessIntervalSeconds?: number;
+  /** decision 183: max pending traces one sweep chunk examines per worker cycle (default 500). */
+  reprocessMaxTracesPerCycle?: number;
 }

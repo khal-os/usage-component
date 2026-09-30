@@ -122,6 +122,7 @@ services:
       TRACE_INGESTION_BATCH_SIZE: ${TRACE_INGESTION_BATCH_SIZE:-1000}
       TRACE_INGESTION_QUIET_PERIOD_SECONDS: ${TRACE_INGESTION_QUIET_PERIOD_SECONDS:-900}
       REPROCESS_INTERVAL_SECONDS: ${REPROCESS_INTERVAL_SECONDS:-3600}
+      REPROCESS_MAX_TRACES_PER_CYCLE: ${REPROCESS_MAX_TRACES_PER_CYCLE:-500}
       # Explicit fixture opt-in for offline demos (decision 127) — a real
       # client's env file never sets this; without a source the sync
       # CRASHES instead of guessing.

@@ -7,6 +7,11 @@ import {
 import { makeDatabase } from '../factories/database-factory.js';
 import { makeLogger } from '../factories/logger-factory.js';
 import { beatWorkerHeartbeat } from './worker-heartbeat.js';
+import {
+  SweepState,
+  afterSweepChunk,
+  nextSweepAction,
+} from './sweep-pacing.js';
 import { assertIngestionIndexes } from '@observability/core/infrastructure/database/mongodb/helpers/assert-ingestion-indexes.js';
 
 /**
@@ -101,12 +106,14 @@ const runWorker = async (): Promise<void> => {
     intervalSeconds: traceIngestionWorkerSettings.intervalMs / 1000,
     reprocessIntervalSeconds:
       traceIngestionWorkerSettings.reprocessIntervalMs / 1000,
+    reprocessMaxTracesPerCycle:
+      traceIngestionWorkerSettings.reprocessMaxTracesPerCycle,
   });
 
   const ingestFailureRepository = makeIngestFailureRepository();
 
   let backoffMs = TRANSIENT_BACKOFF_BASE_MS;
-  let lastReprocessAt = 0;
+  let sweepState: SweepState = { lastRoundEndedAt: 0 };
 
   while (!stopping) {
     let drainFailed = false;
@@ -165,17 +172,40 @@ const runWorker = async (): Promise<void> => {
     // the price-insert job; this is the backstop cadence). Runs on its
     // OWN cadence regardless of drain success (audit B-3): a stalled
     // drain must not starve pending re-stamps.
-    if (
-      !stopping &&
-      Date.now() - lastReprocessAt >=
-        traceIngestionWorkerSettings.reprocessIntervalMs
-    ) {
+    //
+    // Decision 183: in capped chunks, one per cycle, resuming from the
+    // cursor the previous chunk handed back — an uncapped sweep held
+    // ingestion for hours on 2026-09-28. Traces with no model are skipped:
+    // no price can stamp them. The chunk does NOT beat the heartbeat: the
+    // sweep runs even when the drain failed, so beating here would keep a
+    // worker whose ingestion is broken green. The chunk size keeps the next
+    // drain's beat inside the healthcheck window instead.
+    //
+    // Accepted: the cursor lives in memory, so a restart mid-round starts
+    // the round over; cheap now that model-less traces are out of the walk.
+    // A trace that turns pending behind the cursor waits for the next round.
+    const sweep = nextSweepAction(
+      sweepState,
+      Date.now(),
+      traceIngestionWorkerSettings.reprocessIntervalMs,
+    );
+
+    if (!stopping && sweep.kind === 'run-chunk') {
       try {
-        await makeReprocessPendingUseCase().reprocess();
-        lastReprocessAt = Date.now();
+        const report = await makeReprocessPendingUseCase().reprocess({
+          maxTraces: traceIngestionWorkerSettings.reprocessMaxTracesPerCycle,
+          onlyWithModel: true,
+          ...(sweep.after ? { after: sweep.after } : {}),
+        });
+        sweepState = afterSweepChunk(
+          report.resumeAfter,
+          Date.now(),
+          sweepState,
+        );
       } catch (error) {
+        // State untouched: the same chunk retries next cycle.
         logger.error(
-          'Trace ingestion worker: reprocess sweep failed (next cadence retries)',
+          'Trace ingestion worker: reprocess sweep chunk failed (next cycle retries)',
           { err: error },
         );
       }

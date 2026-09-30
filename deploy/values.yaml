@@ -320,6 +320,10 @@ services:
         value: "900"
       - name: REPROCESS_INTERVAL_SECONDS
         value: "3600"
+      # Decisao 183: a varredura de reprocessamento anda em pedacos deste
+      # tamanho, um por ciclo, para nunca segurar a ingestao.
+      - name: REPROCESS_MAX_TRACES_PER_CYCLE
+        value: "500"
       # Decisao 127: ClickHouse direto e a UNICA fonte real. Sem ela o worker
       # fica ocioso e o sync RECUSA rodar — nada de fallback silencioso.
       - name: LANGWATCH_CLICKHOUSE_USER
