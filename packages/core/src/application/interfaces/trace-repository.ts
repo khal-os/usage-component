@@ -29,8 +29,11 @@ export interface PendingPriceTrace {
  * `withModelOnly` drops traces with no model: no price can ever stamp them,
  * only an attribution correction can, so a sweep walking them is wasted.
  * Both are residual filters on pricingStatus_1_startedAt_1 — no index of
- * their own. Revisit with a compound index if the pending queue ever grows
- * back past tens of thousands of traces.
+ * their own, so Mongo FETCHES every pending document between the cursor and
+ * the next match to evaluate them, embedded payload included. Cheap while
+ * the pending queue is small (5 traces on 2026-09-30); revisit with a
+ * compound index if it ever grows back past a few thousand model-less or
+ * other-model traces.
  */
 export interface PendingPriceFilter {
   model?: ModelRef;

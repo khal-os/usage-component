@@ -124,7 +124,7 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
 
     report.pendingRemaining = await this.traceRepository.countPendingPrice();
 
-    this.logReport(report);
+    this.logReport(report, filter);
 
     return report;
   }
@@ -198,8 +198,15 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
     }
   }
 
-  private logReport(report: ReprocessReport): void {
+  private logReport(report: ReprocessReport, filter: PendingPriceFilter): void {
     this.logger.info('Reprocess pending: sweep finished', {
+      // Decision 183: examined/stamped count only this scope;
+      // pendingRemaining is always the whole queue.
+      scope: filter.model
+        ? modelKey(filter.model)
+        : filter.withModelOnly
+          ? 'with-model'
+          : 'all',
       examined: report.examined,
       stamped: report.stamped,
       stillPending: report.stillPending,

@@ -7,11 +7,7 @@ import {
 import { makeDatabase } from '../factories/database-factory.js';
 import { makeLogger } from '../factories/logger-factory.js';
 import { beatWorkerHeartbeat } from './worker-heartbeat.js';
-import {
-  SweepState,
-  afterSweepChunk,
-  nextSweepAction,
-} from './sweep-pacing.js';
+import { SweepState, runSweepCycle } from './sweep-pacing.js';
 import { assertIngestionIndexes } from '@observability/core/infrastructure/database/mongodb/helpers/assert-ingestion-indexes.js';
 
 /**
@@ -113,6 +109,8 @@ const runWorker = async (): Promise<void> => {
   const ingestFailureRepository = makeIngestFailureRepository();
 
   let backoffMs = TRANSIENT_BACKOFF_BASE_MS;
+  // Built once: the sweep now runs every cycle during a round, not hourly.
+  const reprocessPending = makeReprocessPendingUseCase();
   let sweepState: SweepState = { lastRoundEndedAt: 0 };
 
   while (!stopping) {
@@ -184,23 +182,13 @@ const runWorker = async (): Promise<void> => {
     // Accepted: the cursor lives in memory, so a restart mid-round starts
     // the round over; cheap now that model-less traces are out of the walk.
     // A trace that turns pending behind the cursor waits for the next round.
-    const sweep = nextSweepAction(
-      sweepState,
-      Date.now(),
-      traceIngestionWorkerSettings.reprocessIntervalMs,
-    );
-
-    if (!stopping && sweep.kind === 'run-chunk') {
+    if (!stopping) {
       try {
-        const report = await makeReprocessPendingUseCase().reprocess({
-          maxTraces: traceIngestionWorkerSettings.reprocessMaxTracesPerCycle,
-          onlyWithModel: true,
-          ...(sweep.after ? { after: sweep.after } : {}),
-        });
-        sweepState = afterSweepChunk(
-          report.resumeAfter,
-          Date.now(),
+        sweepState = await runSweepCycle(
+          reprocessPending,
           sweepState,
+          Date.now,
+          traceIngestionWorkerSettings,
         );
       } catch (error) {
         // State untouched: the same chunk retries next cycle.

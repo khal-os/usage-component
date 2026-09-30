@@ -1,4 +1,5 @@
 import type { PendingPriceCursor } from '@observability/core/domain/models/pending-price-cursor.js';
+import type { ReprocessPendingUseCase } from '@observability/core/domain/useCases/reprocess-pending-use-case.js';
 
 /**
  * Decision 183 — how the worker paces the reprocess sweep. A round is one
@@ -46,3 +47,29 @@ export const afterSweepChunk = (
   resumeAfter
     ? { cursor: resumeAfter, lastRoundEndedAt: previous.lastRoundEndedAt }
     : { lastRoundEndedAt: now };
+
+/**
+ * One cycle of the sweep: decide, run at most one capped chunk, fold the
+ * outcome. Takes only the use case — it has no way to touch the heartbeat,
+ * which stays the drain's signal alone (decision 183). Model-less traces
+ * are skipped: no price can stamp them. A throwing chunk propagates and
+ * leaves the caller's state untouched, so the same chunk retries next cycle.
+ */
+export const runSweepCycle = async (
+  reprocessPending: ReprocessPendingUseCase,
+  state: SweepState,
+  now: () => number,
+  settings: { reprocessIntervalMs: number; reprocessMaxTracesPerCycle: number },
+): Promise<SweepState> => {
+  const action = nextSweepAction(state, now(), settings.reprocessIntervalMs);
+
+  if (action.kind === 'skip') return state;
+
+  const report = await reprocessPending.reprocess({
+    maxTraces: settings.reprocessMaxTracesPerCycle,
+    onlyWithModel: true,
+    ...(action.after ? { after: action.after } : {}),
+  });
+
+  return afterSweepChunk(report.resumeAfter, now(), state);
+};

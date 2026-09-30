@@ -1,4 +1,13 @@
-import { afterSweepChunk, nextSweepAction } from './sweep-pacing.js';
+import type {
+  ReprocessOptions,
+  ReprocessPendingUseCase,
+  ReprocessReport,
+} from '@observability/core/domain/useCases/reprocess-pending-use-case.js';
+import {
+  afterSweepChunk,
+  nextSweepAction,
+  runSweepCycle,
+} from './sweep-pacing.js';
 
 const HOUR = 3_600_000;
 const cursor = (traceId: string) => ({
@@ -66,5 +75,92 @@ describe('sweep pacing (decision 183)', () => {
     expect(seen).toEqual(['t-500', 't-1000']);
     expect(state.cursor).toBeUndefined();
     expect(nextSweepAction(state, 3, HOUR)).toEqual({ kind: 'skip' });
+  });
+});
+
+describe('runSweepCycle — the loop wiring (decision 183)', () => {
+  const settings = {
+    reprocessIntervalMs: HOUR,
+    reprocessMaxTracesPerCycle: 500,
+  };
+
+  class RecordingReprocess implements ReprocessPendingUseCase {
+    readonly calls: (ReprocessOptions | undefined)[] = [];
+    resumeAfter: ReturnType<typeof cursor> | undefined;
+
+    async reprocess(options?: ReprocessOptions): Promise<ReprocessReport> {
+      this.calls.push(options);
+
+      return {
+        examined: 500,
+        stamped: 0,
+        stillPending: 500,
+        failed: 0,
+        blockedClosedMonth: 0,
+        pendingRemaining: 900,
+        ...(this.resumeAfter ? { resumeAfter: this.resumeAfter } : {}),
+      };
+    }
+  }
+
+  it('runs a capped, model-only chunk and keeps the round open at the handed-back cursor', async () => {
+    const reprocess = new RecordingReprocess();
+    reprocess.resumeAfter = cursor('t-500');
+
+    const next = await runSweepCycle(
+      reprocess,
+      { lastRoundEndedAt: 0 },
+      () => 10 * HOUR,
+      settings,
+    );
+
+    expect(reprocess.calls).toEqual([{ maxTraces: 500, onlyWithModel: true }]);
+    expect(next).toEqual({ cursor: cursor('t-500'), lastRoundEndedAt: 0 });
+  });
+
+  it('continues from the cursor on the next cycle', async () => {
+    const reprocess = new RecordingReprocess();
+
+    const next = await runSweepCycle(
+      reprocess,
+      { cursor: cursor('t-500'), lastRoundEndedAt: 0 },
+      () => 10 * HOUR,
+      settings,
+    );
+
+    expect(reprocess.calls).toEqual([
+      { maxTraces: 500, onlyWithModel: true, after: cursor('t-500') },
+    ]);
+    expect(next).toEqual({ lastRoundEndedAt: 10 * HOUR });
+  });
+
+  it('does not call the use case between rounds before the cadence', async () => {
+    const reprocess = new RecordingReprocess();
+    const state = { lastRoundEndedAt: 10 * HOUR };
+
+    const next = await runSweepCycle(
+      reprocess,
+      state,
+      () => 10 * HOUR + 1,
+      settings,
+    );
+
+    expect(reprocess.calls).toHaveLength(0);
+    expect(next).toBe(state);
+  });
+
+  it('a failing chunk propagates, so the caller keeps its state and retries the same chunk', async () => {
+    const failing: ReprocessPendingUseCase = {
+      reprocess: () => Promise.reject(new Error('mongo down')),
+    };
+
+    await expect(
+      runSweepCycle(
+        failing,
+        { cursor: cursor('t-500'), lastRoundEndedAt: 0 },
+        () => 10 * HOUR,
+        settings,
+      ),
+    ).rejects.toThrow('mongo down');
   });
 });

@@ -17,6 +17,9 @@ export interface ReprocessReport {
    * Pending traces left AFTER this run (audit B-5): a capped run (the
    * POST /prices door) stamps one page and reports the honest remainder —
    * the worker's periodic sweep drains it (decision 57's backstop).
+   * Always the WHOLE queue, even when `model`/`onlyWithModel` narrowed the
+   * run: examined/stamped describe the run's scope, this describes the
+   * archive (decision 183).
    */
   pendingRemaining: number;
   /**
