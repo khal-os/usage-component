@@ -84,6 +84,7 @@ const cacheSavingsSchema = z.strictObject({
   cache_write_cost_brl_display: z.string(),
   /** Signed — heavy cache writes can eat the read savings. */
   net_savings_brl_display: z.string(),
+  /** Sign of the DISPLAYED net (derived from displayed cents, #111), so it never contradicts the string. */
   net_positive: z.boolean(),
   unpriceable_cache_read_traces: z.number().int(),
   basis_text: z.string(),

@@ -27,6 +27,7 @@ import {
   formatBrlExactFromMicrocents,
   formatBrlFromCents,
   formatBrlFromMicrocents,
+  microcentsToDisplayCents,
   reconcileDisplayCents,
 } from '@observability/core/common/helpers/money/money.js';
 import {
@@ -107,19 +108,20 @@ const bpToPercentDisplay = (bp: number): string => {
   return `${whole},${fractionText}%`;
 };
 
-/** Signed BRL for deltas — the money helpers stay non-negative by contract. */
-const signedBrlDisplay = (microcents: number): string => {
-  const sign = microcents < 0 ? '−' : '+';
+/** One sign/format rule for every signed BRL — the money helpers stay non-negative by contract. */
+const signedCentsDisplay = (negative: boolean, cents: number): string =>
+  `${negative ? '−' : '+'} ${formatBrlDisplay(formatBrlFromCents(cents))}`;
 
-  return `${sign} ${formatBrlDisplay(formatBrlFromMicrocents(Math.abs(microcents)))}`;
-};
+/** Signed BRL for deltas: the sign comes from the exact µ¢, the magnitude rounds half-up. */
+const signedBrlDisplay = (microcents: number): string =>
+  signedCentsDisplay(
+    microcents < 0,
+    microcentsToDisplayCents(Math.abs(microcents)),
+  );
 
-/** Signed EXACT BRL — cache savings keep line-level precision (T5 honesty). */
-const signedBrlExactDisplay = (microcents: number): string => {
-  const sign = microcents < 0 ? '−' : '+';
-
-  return `${sign} ${formatBrlDisplay(formatBrlExactFromMicrocents(Math.abs(microcents)))}`;
-};
+/** Signed BRL from already-displayed cents. */
+const signedBrlFromCentsDisplay = (cents: number): string =>
+  signedCentsDisplay(cents < 0, Math.abs(cents));
 
 /** Delta as percent of the previous value; null when previous is zero. */
 const deltaPercentDisplay = (
@@ -347,21 +349,35 @@ const toCacheSavingsView = (
 ): BillingSummaryView['cache_savings'] => {
   const cache = statement.cacheSavings;
 
+  // Month aggregates are totals, so they get display rounding (T5), and the
+  // panel shows its own arithmetic ("diferença entre os dois acima", "bruta
+  // menos a gravação"). The three measured values round once; the two derived
+  // ones come from those displayed cents, so the on-screen sums always close.
+  const actualCents = microcentsToDisplayCents(
+    cache.actualCacheReadCostMicrocents,
+  );
+  const counterfactualCents = microcentsToDisplayCents(
+    cache.counterfactualInputCostMicrocents,
+  );
+  const writeCents = microcentsToDisplayCents(cache.cacheWriteCostMicrocents);
+  const savingsCents = counterfactualCents - actualCents;
+  const netSavingsCents = savingsCents - writeCents;
+
   return {
     cache_read_tokens: cache.cacheReadTokens,
     cache_read_tokens_display: formatIntDisplay(cache.cacheReadTokens),
     actual_cache_read_cost_brl_display: formatBrlDisplay(
-      formatBrlExactFromMicrocents(cache.actualCacheReadCostMicrocents),
+      formatBrlFromCents(actualCents),
     ),
     counterfactual_input_cost_brl_display: formatBrlDisplay(
-      formatBrlExactFromMicrocents(cache.counterfactualInputCostMicrocents),
+      formatBrlFromCents(counterfactualCents),
     ),
-    savings_brl_display: signedBrlExactDisplay(cache.savingsMicrocents),
+    savings_brl_display: signedBrlFromCentsDisplay(savingsCents),
     cache_write_cost_brl_display: formatBrlDisplay(
-      formatBrlExactFromMicrocents(cache.cacheWriteCostMicrocents),
+      formatBrlFromCents(writeCents),
     ),
-    net_savings_brl_display: signedBrlExactDisplay(cache.netSavingsMicrocents),
-    net_positive: cache.netSavingsMicrocents >= 0,
+    net_savings_brl_display: signedBrlFromCentsDisplay(netSavingsCents),
+    net_positive: netSavingsCents >= 0,
     unpriceable_cache_read_traces: cache.unpriceableCacheReadTraces,
     basis_text:
       'Contrafactual: cada leitura de cache cobrada como se fosse input ' +
