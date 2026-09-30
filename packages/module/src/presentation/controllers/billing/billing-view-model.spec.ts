@@ -220,4 +220,21 @@ describe('toBillingSummaryView — cache savings panel shows totals in cents and
     expect(cache.net_savings_brl_display).toBe('− R$ 0,01');
     expect(cache.net_positive).toBe(false);
   });
+
+  it('shows a NEGATIVE saving when the contracted cache read costs more than input', () => {
+    const view = toBillingSummaryView(
+      withCacheSavings({
+        cacheReadTokens: 1_000,
+        actualCacheReadCostMicrocents: 300_000_000,
+        counterfactualInputCostMicrocents: 200_000_000,
+        savingsMicrocents: -100_000_000,
+        cacheWriteCostMicrocents: 0,
+        netSavingsMicrocents: -100_000_000,
+      }),
+    );
+
+    expect(view.cache_savings.savings_brl_display).toBe('− R$ 1,00');
+    expect(view.cache_savings.net_savings_brl_display).toBe('− R$ 1,00');
+    expect(view.cache_savings.net_positive).toBe(false);
+  });
 });

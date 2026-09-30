@@ -108,19 +108,20 @@ const bpToPercentDisplay = (bp: number): string => {
   return `${whole},${fractionText}%`;
 };
 
-/** Signed BRL for deltas — the money helpers stay non-negative by contract. */
-const signedBrlDisplay = (microcents: number): string => {
-  const sign = microcents < 0 ? '−' : '+';
+/** One sign/format rule for every signed BRL — the money helpers stay non-negative by contract. */
+const signedCentsDisplay = (negative: boolean, cents: number): string =>
+  `${negative ? '−' : '+'} ${formatBrlDisplay(formatBrlFromCents(cents))}`;
 
-  return `${sign} ${formatBrlDisplay(formatBrlFromMicrocents(Math.abs(microcents)))}`;
-};
+/** Signed BRL for deltas: the sign comes from the exact µ¢, the magnitude rounds half-up. */
+const signedBrlDisplay = (microcents: number): string =>
+  signedCentsDisplay(
+    microcents < 0,
+    microcentsToDisplayCents(Math.abs(microcents)),
+  );
 
-/** Signed BRL from already-displayed cents — the sign travels with the value. */
-const signedBrlFromCentsDisplay = (cents: number): string => {
-  const sign = cents < 0 ? '−' : '+';
-
-  return `${sign} ${formatBrlDisplay(formatBrlFromCents(Math.abs(cents)))}`;
-};
+/** Signed BRL from already-displayed cents. */
+const signedBrlFromCentsDisplay = (cents: number): string =>
+  signedCentsDisplay(cents < 0, Math.abs(cents));
 
 /** Delta as percent of the previous value; null when previous is zero. */
 const deltaPercentDisplay = (
