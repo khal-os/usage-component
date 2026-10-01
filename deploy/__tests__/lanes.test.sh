@@ -4,6 +4,7 @@
 # quando ele roda de verdade ja mexeu no registry; estas asserces sao o que da
 # para provar antes disso.
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/_ecs-guard.sh"
 cd "$RAIZ"
 
 WF=".github/workflows"
@@ -147,6 +148,10 @@ BASE="${KOS_BASE_REF:-origin/main}"
 # esteira ECS: taskdefs, tenants, scripts, langwatch, Caddyfile e os workflows
 # nao-eks. QUALQUER aparicao deles (A, M ou D) vinda do lado eks/** e violacao
 # do §0.1 — essa esteira so muda via main.
+# Squash promotions (D16): eks/homolog and eks/main receive main's commits only
+# as squashed content, never as ancestors, so a file is reported only when its
+# content at HEAD also differs from BASE. Implementation and rationale in
+# _ecs-guard.sh; proven on built histories in ecs-guard.test.sh.
 # Isso so significa alguma coisa quando o que esta sendo medido E esta stream —
 # ou seja, nas branches `eks/**`. Fora de eks/** o guard nao aprova nada: ele
 # diz, em voz alta, que NAO mediu.
@@ -158,10 +163,11 @@ else
     git fetch --no-tags --quiet origin main 2>/dev/null || true
   fi
   if git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
-    TOCADOS="$(git diff --name-status "${BASE}...HEAD" -- \
-        deploy/taskdefs deploy/tenants deploy/scripts deploy/langwatch deploy/Caddyfile .github/workflows \
-      | awk '$2 !~ /^\.github\/workflows\/eks-/ { print $1 " " $2 }')"
-    verifica "nenhum arquivo da esteira ECS tocado deste lado (merge-base..HEAD)" "" "$TOCADOS"
+    if TOCADOS="$(ecs_touched "$BASE")"; then
+      verifica "nenhum arquivo da esteira ECS tocado deste lado (merge-base..HEAD)" "" "$TOCADOS"
+    else
+      falha "could not diff ${BASE}...HEAD (no merge-base? shallow clone?) — this guard was NOT measured"
+    fi
   else
     falha "nao consegui resolver ${BASE} — este guard NAO foi medido (defina KOS_BASE_REF ou traga a base)"
   fi
