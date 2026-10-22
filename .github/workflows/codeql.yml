@@ -1,11 +1,11 @@
-# Static analysis (free on public repos). Runs on PRs, main, the merge
+# Static analysis (free on public repos). Runs on PRs, eks/dev, the merge
 # queue (required checks must report on merge_group) and a weekly cron —
 # the cron catches newly-published queries against unchanged code.
 name: CodeQL security scan
 
 on:
   push:
-    branches: [main]
+    branches: [eks/dev]
   pull_request:
   merge_group:
   schedule:

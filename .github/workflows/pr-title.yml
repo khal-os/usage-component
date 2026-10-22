@@ -1,6 +1,6 @@
 # The PR title, linted on its own — because it becomes a commit message.
 #
-# A squash merge lands the PR TITLE on main, so a title that is not a
+# A squash merge lands the PR TITLE on eks/dev, so a title that is not a
 # conventional commit puts a non-conforming message in the history that
 # commitlint would have rejected anywhere else.
 #
