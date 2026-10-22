@@ -1,10 +1,11 @@
-# Weekly dependency PRs. npm minor+patch arrive grouped (one PR to review,
+# Weekly dependency PRs, against eks/dev (the lane where code lands; main was retired). npm minor+patch arrive grouped (one PR to review,
 # CI proves it); majors come alone. github-actions keeps the SHA-pinned
 # workflow actions current; docker tracks the base images under docker/.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    target-branch: eks/dev
     schedule:
       interval: weekly
       day: monday
@@ -17,6 +18,7 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: eks/dev
     schedule:
       interval: weekly
       day: monday
@@ -27,6 +29,7 @@ updates:
 
   - package-ecosystem: docker
     directory: /docker
+    target-branch: eks/dev
     schedule:
       interval: weekly
       day: monday

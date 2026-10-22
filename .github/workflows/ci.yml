@@ -13,7 +13,7 @@ name: Lint, typecheck & tests
 
 on:
   push:
-    branches: [main]
+    branches: [eks/dev]
   pull_request:
   # The merge queue re-runs these checks on the speculative merge commit;
   # required checks must report on merge_group or the queue stalls.
@@ -180,7 +180,7 @@ jobs:
             gh api -X POST "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" -F body=@.dashboard.md > /dev/null
           fi
 
-  # On every main build, append one line to the ci-metrics branch — the
+  # On every eks/dev build (the lane where code lands; homolog and main only promote it), append one line to the ci-metrics branch — the
   # baseline the dashboard's deltas/trend/timing compare against.
   record-metrics:
     name: Record main metrics
