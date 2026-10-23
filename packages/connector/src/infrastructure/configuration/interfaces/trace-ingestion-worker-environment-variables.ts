@@ -27,6 +27,8 @@ export interface TraceIngestionWorkerEnvironmentVariables {
   traceIngestionBatchSize?: number;
   /** decision 61: seconds a trace must be quiet before syncing (default 900). */
   traceIngestionQuietPeriodSeconds?: number;
+  /** issue #102: traces written at once per batch, same-session traces sequential (default 8). */
+  traceIngestionConcurrency?: number;
   /** Seconds between periodic reprocess sweeps in the worker (default 3600). */
   reprocessIntervalSeconds?: number;
 }

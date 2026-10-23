@@ -1,5 +1,8 @@
 import { SyncTracesDbUseCase } from '../../application/useCases/syncTraces/sync-traces-db-use-case.js';
-import { SyncBatchesDbUseCase } from '../../application/useCases/syncBatches/sync-batches-db-use-case.js';
+import {
+  DEFAULT_INGESTION_CONCURRENCY,
+  SyncBatchesDbUseCase,
+} from '../../application/useCases/syncBatches/sync-batches-db-use-case.js';
 import { ReprocessPendingDbUseCase } from '@observability/core/application/useCases/reprocessPending/reprocess-pending-db-use-case.js';
 import { TraceSourceClient } from '../../application/interfaces/trace-source-client.js';
 import { FakeTraceSourceClient } from '../../infrastructure/traceSource/fake-trace-source-client.js';
@@ -173,6 +176,8 @@ export const makeSyncBatchesUseCase = ():
       estimateDocumentBytes: estimateBsonBytes,
       batchSize: config.traceIngestionBatchSize ?? INGESTION_DEFAULTS.batchSize,
       quietPeriodMs: quietPeriodMs(),
+      concurrency:
+        config.traceIngestionConcurrency ?? DEFAULT_INGESTION_CONCURRENCY,
       logger: syncLogger,
     }),
   };
