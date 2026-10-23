@@ -1,7 +1,7 @@
-# CI da esteira EKS — NOVA, paralela. Nao substitui nem toca `ci.yml`,
-# `build-images.yml` ou `deploy-tenant.yml`: o repo continua entregando em ECS
-# ate o cutover, e esta lane so olha para `deploy/**` e para os proprios
-# workflows `eks-*`.
+# CI da esteira EKS. Nao substitui `ci.yml`. A esteira ECS (`build-images.yml`,
+# `deploy-tenant.yml`) foi removida em 2026-10-22 junto com a branch `main`,
+# porque nao ha mais cluster ECS em nenhuma conta. Esta lane so olha para
+# `deploy/**` e para os proprios workflows `eks-*`.
 #
 # O que ela prova, em ordem de consequencia:
 #   1. o chart RENDERIZA nos tres ambientes com pins validos;

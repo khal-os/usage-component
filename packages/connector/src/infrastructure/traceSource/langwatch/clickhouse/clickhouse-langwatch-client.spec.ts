@@ -2,7 +2,9 @@ import {
   ClickHouseLangWatchClient,
   EXPECTED_LANGWATCH_SCHEMA_VERSION,
   QueryFn,
+  SPAN_WINDOW_MARGIN_MS,
   WINDOW_PAGE_SIZE,
+  spanWindowOf,
 } from './clickhouse-langwatch-client.js';
 import {
   PoisonRowRecord,
@@ -257,6 +259,85 @@ describe('ClickHouseLangWatchClient', () => {
 
       expect(calls[0]?.query).toContain('s.TenantId = {tenantId:String}');
       expect(calls[0]?.params).toMatchObject({ tenantId: 'project_abc' });
+    });
+
+    it('MUST bound the span query to the batch time window and the tenant, so it reads one partition, not the whole table', async () => {
+      const early = summaryRow('trace-a', T0); // occurred T0 - 5s, lasts 1s
+      const late = {
+        ...summaryRow('trace-b', T0 + 60_000),
+        totalDurationMs: 30_000,
+      };
+      const { queryFn, calls } = makeQueryStub([[early, late], []]);
+      const sut = makeSut(queryFn, 'project_abc');
+
+      await sut.fetchBatch({
+        after: null,
+        limit: 2,
+        updatedBefore: new Date(T0 + 120_000),
+      });
+
+      const spans = calls[1];
+
+      expect(spans?.query).toContain('FROM stored_spans FINAL');
+      expect(spans?.query).toContain(
+        'StartTime >= fromUnixTimestamp64Milli({spansFromMs:Int64})',
+      );
+      expect(spans?.query).toContain(
+        'StartTime <= fromUnixTimestamp64Milli({spansToMs:Int64})',
+      );
+      expect(spans?.query).toContain('AND TenantId = {tenantId:String}');
+      expect(spans?.params).toMatchObject({
+        traceIds: ['trace-a', 'trace-b'],
+        spansFromMs: early.occurredAtMs - SPAN_WINDOW_MARGIN_MS,
+        spansToMs: late.occurredAtMs + 30_000 + SPAN_WINDOW_MARGIN_MS,
+        tenantId: 'project_abc',
+      });
+    });
+
+    it('MUST NOT add the tenant clause to the span query when no project id is configured', async () => {
+      const { queryFn, calls } = makeQueryStub([
+        [summaryRow('trace-a', T0)],
+        [],
+      ]);
+      const sut = makeSut(queryFn);
+
+      await sut.fetchBatch({
+        after: null,
+        limit: 1,
+        updatedBefore: new Date(T0 + 60_000),
+      });
+
+      expect(calls[1]?.query).not.toContain('TenantId');
+      expect(calls[1]?.params).not.toHaveProperty('tenantId');
+    });
+  });
+
+  describe('spanWindowOf', () => {
+    it('MUST span from the earliest start to the latest end, widened by the margin', () => {
+      expect(
+        spanWindowOf([
+          { occurredAtMs: 10_000, totalDurationMs: 500 },
+          { occurredAtMs: 2_000, totalDurationMs: 100 },
+        ]),
+      ).toEqual({
+        fromMs: 2_000 - SPAN_WINDOW_MARGIN_MS,
+        toMs: 10_500 + SPAN_WINDOW_MARGIN_MS,
+      });
+    });
+
+    it('MUST treat a negative or non-finite duration as zero', () => {
+      expect(
+        spanWindowOf([{ occurredAtMs: 5_000, totalDurationMs: -40 }]),
+      ).toEqual({
+        fromMs: 5_000 - SPAN_WINDOW_MARGIN_MS,
+        toMs: 5_000 + SPAN_WINDOW_MARGIN_MS,
+      });
+      expect(
+        spanWindowOf([{ occurredAtMs: 5_000, totalDurationMs: Number.NaN }]),
+      ).toEqual({
+        fromMs: 5_000 - SPAN_WINDOW_MARGIN_MS,
+        toMs: 5_000 + SPAN_WINDOW_MARGIN_MS,
+      });
     });
   });
 

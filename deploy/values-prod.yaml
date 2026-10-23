@@ -85,12 +85,11 @@ services:
       MONGO_USAGE_DB_NAME: usage_db
       LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch.svc.cluster.local:8123
       NODE_OPTIONS: --max-old-space-size=1536
-      # 50, not 500: the per-batch span query (stored_spans FINAL by TraceId,
-      # reading the attributes map) measured 8s at 50, 25s at 100 and 73s at
-      # 500 on 2026-10-22, and the ClickHouse client has the 30s default
-      # request timeout. A cycle drains batch after batch until caught up, so
-      # a smaller batch only adds round trips.
-      TRACE_INGESTION_BATCH_SIZE: 50
+      # 500 again since #147 bounded the span query to the batch time window
+      # and tenant: 500 traces take 0.4s on prod (2026-10-23), where 50 had
+      # grown to 99s without the window and stalled the worker. The 30s client
+      # timeout is still the library default (#144).
+      TRACE_INGESTION_BATCH_SIZE: 500
     extraEgress:
       - namespace: kos-langwatch
         ports:

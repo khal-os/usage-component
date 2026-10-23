@@ -68,7 +68,21 @@ const SUMMARY_SELECT = `
     s.RootSpanType                            AS rootSpanType
   FROM trace_summaries AS s FINAL`;
 
-const SPANS_SELECT = `
+/**
+ * How far the span query looks before the batch's earliest trace start and
+ * after its latest trace end. stored_spans is partitioned by the week of
+ * StartTime and sorted by (TenantId, TraceId, SpanId); without a StartTime
+ * bound and the tenant prefix, `TraceId IN (...)` under FINAL reads every
+ * partition, and the query grew with the table until it passed the client
+ * timeout (measured on 2026-10-22/23: 50 traces took 8s, then 99s; the same
+ * batch with the window takes 0.4s, and 500 traces take 0.54s). The margin
+ * covers clock skew between the trace summary and its spans; a span outside
+ * [earliest start - margin, latest end + margin] would be a span of another
+ * trace, not this batch's.
+ */
+export const SPAN_WINDOW_MARGIN_MS = 60 * 60 * 1000;
+
+const spansSelect = (withTenant: boolean): string => `
   SELECT
     TraceId                                   AS traceId,
     SpanId                                    AS spanId,
@@ -81,6 +95,9 @@ const SPANS_SELECT = `
     mapUpdate(ResourceAttributes, SpanAttributes) AS attributes
   FROM stored_spans FINAL
   WHERE TraceId IN {traceIds:Array(String)}
+    AND StartTime >= fromUnixTimestamp64Milli({spansFromMs:Int64})
+    AND StartTime <= fromUnixTimestamp64Milli({spansToMs:Int64})
+    ${withTenant ? 'AND TenantId = {tenantId:String}' : ''}
   ORDER BY StartTime ASC, SpanId ASC`;
 
 /**
@@ -397,6 +414,7 @@ export class ClickHouseLangWatchClient
 
     const spansByTrace = await this.fetchSpans(
       summaries.map((summary) => summary.row.traceId),
+      spanWindowOf(summaries.map((summary) => summary.row)),
       context,
     );
 
@@ -454,9 +472,15 @@ export class ClickHouseLangWatchClient
 
   private async fetchSpans(
     traceIds: string[],
+    window: { fromMs: number; toMs: number },
     context: string,
   ): Promise<Map<string, SpanRow[]>> {
-    const rows = await this.queryFn(SPANS_SELECT, { traceIds });
+    const rows = await this.queryFn(spansSelect(Boolean(this.tenantId)), {
+      traceIds,
+      spansFromMs: window.fromMs,
+      spansToMs: window.toMs,
+      ...(this.tenantId ? { tenantId: this.tenantId } : {}),
+    });
     const spansByTrace = new Map<string, SpanRow[]>();
 
     for (const raw of rows) {
@@ -596,5 +620,33 @@ const makeClickHouseQueryFn = (args: {
     });
 
     return result.json();
+  };
+};
+
+/**
+ * The StartTime window that holds every span of a batch: from the earliest
+ * trace start to the latest trace end, widened by SPAN_WINDOW_MARGIN_MS on
+ * both sides. A negative or missing duration counts as zero, so a corrupt
+ * summary only narrows the end to its own start plus the margin.
+ */
+export const spanWindowOf = (
+  rows: ReadonlyArray<{ occurredAtMs: number; totalDurationMs: number }>,
+): { fromMs: number; toMs: number } => {
+  let fromMs = Number.POSITIVE_INFINITY;
+  let toMs = Number.NEGATIVE_INFINITY;
+
+  for (const row of rows) {
+    const durationMs =
+      Number.isFinite(row.totalDurationMs) && row.totalDurationMs > 0
+        ? row.totalDurationMs
+        : 0;
+
+    fromMs = Math.min(fromMs, row.occurredAtMs);
+    toMs = Math.max(toMs, row.occurredAtMs + durationMs);
+  }
+
+  return {
+    fromMs: fromMs - SPAN_WINDOW_MARGIN_MS,
+    toMs: toMs + SPAN_WINDOW_MARGIN_MS,
   };
 };

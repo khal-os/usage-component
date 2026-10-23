@@ -1,5 +1,5 @@
-# PR-time image validation. build-images.yml builds & pushes to ECR only
-# AFTER a merge to main — so a Dockerfile broken by a PR used to surface
+# PR-time image validation. The eks-deploy-dev lane builds & pushes to ECR only
+# AFTER a merge to eks/dev — so a Dockerfile broken by a PR used to surface
 # post-merge (it shipped twice: husky/prepare failures visible only in
 # image builds). This lane builds every image on the PR itself, no push,
 # and Trivy-scans the runtime images. deploy-smoke runs the docker-free
@@ -8,7 +8,7 @@ name: Image build & scan
 
 on:
   push:
-    branches: [main]
+    branches: [eks/dev]
   pull_request:
   merge_group:
   workflow_dispatch:
@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         # image = local tag; dockerfile = docker/<name>.Dockerfile. Same
-        # pairs as build-images.yml — usage-db-backup has no platform-
+        # pairs as the eks-deploy-dev lane builds — usage-db-backup has no platform-
         # prefix (it backs up the tenant's usage DB, not the platform).
         include:
           - { image: platform-module, dockerfile: module }
@@ -119,7 +119,7 @@ jobs:
           retention-days: 2
           if-no-files-found: ignore
 
-  # Sticky PR comment #2 (decision 146): image sizes with delta vs main +
+  # Sticky PR comment #2 (decision 146): image sizes with delta vs eks/dev +
   # Trivy counts. Not a required check; skipped for dependabot/fork PRs.
   docker-dashboard:
     name: Docker dashboard
@@ -160,7 +160,7 @@ jobs:
             gh api -X POST "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" -F body=@.docker-dashboard.md > /dev/null
           fi
 
-  # On every main build, append one image-metrics line to ci-metrics —
+  # On every eks/dev build, append one image-metrics line to ci-metrics —
   # the size baseline the PR dashboard's deltas compare against.
   record-image-metrics:
     name: Record main image metrics
