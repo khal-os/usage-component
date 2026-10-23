@@ -32,14 +32,14 @@ extraEgress:
 # ── Pins (ESCRITO POR deploy/gitops-pin.sh — nao editar a mao) ────────────────
 pins:
   usage-module:
-    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    gitSha: "0000000000000000000000000000000000000000"
+    digest: "sha256:6301a6f8ec0f6533afc300b7fdda531b30b162c51198b6b2e678e6527be98e75"
+    gitSha: "07e1499663315527ee124e485f1e00f9021aca40"
   usage-connector:
-    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    gitSha: "0000000000000000000000000000000000000000"
+    digest: "sha256:74bfea03aef61ac3e7a5f5a7acb0c47d76a78ab6e2a410de0ce22a546b12355b"
+    gitSha: "07e1499663315527ee124e485f1e00f9021aca40"
   usage-db-backup:
-    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    gitSha: "0000000000000000000000000000000000000000"
+    digest: "sha256:73977713d50f5ff4123c97dc96331b293b6cdc8d21980b5f47c76e0ccc388ad7"
+    gitSha: "07e1499663315527ee124e485f1e00f9021aca40"
 
 services:
   api:
@@ -70,10 +70,26 @@ services:
       MCP_AUDIENCE: usage-mcp
 
   trace-ingestion-worker:
+    # Incident 2026-09-28: OOM-crashloop since 09-18 — Node's default heap
+    # (~512Mi) burst on the first batch while the container had 1Gi. A bigger
+    # preset does NOT resize the Node heap by itself: preset and NODE_OPTIONS
+    # move TOGETHER (heap ~75% of the limit). A batch is 1000 traces + ALL
+    # their spans with LLM content in one page, with no byte ceiling; the
+    # page cap below keeps memory bounded until byte-bounded paging lands.
+    # 500 (not the old 1000) drains the ~224k-trace backlog ~5x faster and
+    # was sized against the 1536Mi heap: the crash was 1000-trace pages vs
+    # a 512Mi default heap.
+    preset: L
     envOverride:
       ENVIRONMENT: production
       MONGO_USAGE_DB_NAME: usage_db
       LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch.svc.cluster.local:8123
+      NODE_OPTIONS: --max-old-space-size=1536
+      # 500 again since #147 bounded the span query to the batch time window
+      # and tenant: 500 traces take 0.4s on prod (2026-10-23), where 50 had
+      # grown to 99s without the window and stalled the worker. The 30s client
+      # timeout is still the library default (#144).
+      TRACE_INGESTION_BATCH_SIZE: 500
     extraEgress:
       - namespace: kos-langwatch
         ports:
