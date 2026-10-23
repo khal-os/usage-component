@@ -205,6 +205,7 @@ const makeSut = (args?: {
   traceBatchSource?: TraceBatchSourceStub;
   traceRepository?: TraceRepositoryStub;
   concurrency?: number;
+  elapsedMs?: () => number;
 }) => {
   const traceBatchSourceStub =
     args?.traceBatchSource ?? new TraceBatchSourceStub();
@@ -229,6 +230,7 @@ const makeSut = (args?: {
       ? {}
       : { concurrency: args.concurrency }),
     now: () => NOW,
+    ...(args?.elapsedMs ? { elapsedMs: args.elapsedMs } : {}),
     logger,
   });
 
@@ -654,6 +656,40 @@ describe('SyncBatchesDbUseCase', () => {
         ingestFailureRepositoryStub.failures.map((f) => f.traceId),
       ).toEqual(['trace-2']);
       expect(syncStateRepositoryStub.writes).toEqual([cursorOf('trace-3')]);
+    });
+  });
+});
+
+describe('batch phase durations in the log', () => {
+  /** Hands out the given readings in order, one per call. */
+  const scriptedClock =
+    (...readings: number[]) =>
+    (): number => {
+      const reading = readings.shift();
+
+      if (reading === undefined) throw new Error('clock read too often');
+
+      return reading;
+    };
+
+  it('MUST log how long the fetch, the writes and the whole batch took, and with how many lanes', async () => {
+    const { sut, logger } = makeSut({
+      concurrency: 4,
+      // start, after fetch, after writes, end
+      elapsedMs: scriptedClock(1000, 1040.4, 1100.2, 1105.9),
+    });
+
+    await sut.syncNextBatch();
+
+    const finished = logger.lines.find(
+      (line) => line.message === 'Sync: batch finished',
+    );
+
+    expect(finished?.fields).toMatchObject({
+      concurrency: 4,
+      fetchMs: 40,
+      writeMs: 60,
+      totalMs: 106,
     });
   });
 });

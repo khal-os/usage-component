@@ -24,6 +24,7 @@
         { "name": "TRACE_INGESTION_BATCH_SIZE", "value": "${TRACE_INGESTION_BATCH_SIZE}" },
         { "name": "TRACE_INGESTION_QUIET_PERIOD_SECONDS", "value": "${TRACE_INGESTION_QUIET_PERIOD_SECONDS}" },
         { "name": "REPROCESS_INTERVAL_SECONDS", "value": "${REPROCESS_INTERVAL_SECONDS}" },
+        { "name": "REPROCESS_MAX_TRACES_PER_CYCLE", "value": "${REPROCESS_MAX_TRACES_PER_CYCLE}" },
         { "name": "LANGWATCH_CLICKHOUSE_URL", "value": "${LANGWATCH_CLICKHOUSE_URL}" },
         { "name": "LANGWATCH_CLICKHOUSE_USER", "value": "default" },
         { "name": "LANGWATCH_CLICKHOUSE_DATABASE", "value": "langwatch" }

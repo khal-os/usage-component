@@ -2,6 +2,7 @@ import { PriceVersionModel } from '../../../domain/models/price-version-model.js
 import { ReprocessPendingDbUseCase } from './reprocess-pending-db-use-case.js';
 import {
   EffectivePrices,
+  PendingPriceFilter,
   PendingPriceTrace,
   PendingStamp,
   PriceVersionRepository,
@@ -10,6 +11,7 @@ import {
 import { TraceAttribution } from '../../interfaces/trace-repository.js';
 import { ModelRef } from '../../../domain/models/model-ref.js';
 import { InMemoryBillingPeriodRepository } from '../../testSupport/billing-test-fakes.js';
+import { RecordingLogger } from '../../../common/logging/logging-test-fakes.js';
 
 /**
  * audit M2: the reprocess sweep finally gets its own spec — the closed-
@@ -76,14 +78,24 @@ class TraceRepositoryStub implements TraceRepository {
     pinnedModel: ModelRef | null;
   }[] = [];
 
+  readonly filtersSeen: (PendingPriceFilter | undefined)[] = [];
+
   async findPendingPrice(
     limit: number,
     after?: { startedAt: Date; traceId: string },
+    filter?: PendingPriceFilter,
   ): Promise<PendingPriceTrace[]> {
+    this.filtersSeen.push(filter);
+
     // Adapter semantics: pending set, tuple-sorted, strictly after the
-    // cursor; stamped traces have left the set.
+    // cursor, narrowed by the filter; stamped traces have left the set.
     const stillPending = this.pending.filter(
-      (trace) => !this.stamps.some((stamp) => stamp.traceId === trace.traceId),
+      (trace) =>
+        !this.stamps.some((stamp) => stamp.traceId === trace.traceId) &&
+        (!filter?.withModelOnly || trace.model !== undefined) &&
+        (!filter?.model ||
+          (trace.model?.id === filter.model.id &&
+            trace.model.provider === filter.model.provider)),
     );
     const sorted = [...stillPending].sort(
       (a, b) =>
@@ -365,5 +377,136 @@ describe('ReprocessPendingDbUseCase', () => {
     expect(traceRepository.stamps.map((stamp) => stamp.traceId)).toEqual([
       'reachable',
     ]);
+  });
+});
+
+describe('ReprocessPendingDbUseCase — resumable chunks and filters (decision 183)', () => {
+  const at = (hour: number) => new Date(Date.UTC(2026, 6, 5, hour));
+
+  it('a capped run hands back resumeAfter, and the next run continues WITHOUT re-examining the head', async () => {
+    const { sut, traceRepository, priceVersionRepository } = makeSut();
+    // Unpriced head: they stay pending, so only the cursor can move past them.
+    priceVersionRepository.pricedModels.clear();
+    traceRepository.pending = [
+      pendingTrace({ traceId: 'a', startedAt: at(1) }),
+      pendingTrace({ traceId: 'b', startedAt: at(2) }),
+      pendingTrace({ traceId: 'c', startedAt: at(3) }),
+    ];
+
+    const first = await sut.reprocess({ maxTraces: 2 });
+
+    expect(first.examined).toBe(2);
+    expect(first.resumeAfter).toEqual({ startedAt: at(2), traceId: 'b' });
+
+    const second = await sut.reprocess({
+      maxTraces: 2,
+      after: first.resumeAfter,
+    });
+
+    expect(second.examined).toBe(1);
+    expect(second.resumeAfter).toBeUndefined();
+    expect(priceVersionRepository.lookups).toHaveLength(3);
+  });
+
+  it('a run that reaches the end of the queue reports no resumeAfter', async () => {
+    const { sut, traceRepository } = makeSut();
+    traceRepository.pending = [pendingTrace({ traceId: 'only' })];
+
+    const report = await sut.reprocess({ maxTraces: 500 });
+
+    expect(report.examined).toBe(1);
+    expect(report.resumeAfter).toBeUndefined();
+  });
+
+  it('a trace that turns pending BEHIND the cursor waits for the next round (accepted, documented gap)', async () => {
+    const { sut, traceRepository, priceVersionRepository } = makeSut();
+    priceVersionRepository.pricedModels.clear();
+    traceRepository.pending = [
+      pendingTrace({ traceId: 'a', startedAt: at(1) }),
+      pendingTrace({ traceId: 'c', startedAt: at(3) }),
+    ];
+
+    const first = await sut.reprocess({ maxTraces: 1 });
+    traceRepository.pending.push(
+      pendingTrace({ traceId: 'late', startedAt: at(0) }),
+    );
+    const second = await sut.reprocess({
+      maxTraces: 5,
+      after: first.resumeAfter,
+    });
+
+    expect(second.examined).toBe(1);
+    expect(priceVersionRepository.lookups.map((l) => l.atDate)).not.toContain(
+      at(0),
+    );
+  });
+
+  it('model: stamps only the traces of the model whose price was just registered', async () => {
+    const { sut, traceRepository, priceVersionRepository } = makeSut();
+    const SONNET: ModelRef = { id: 'claude-sonnet-4-6', provider: 'anthropic' };
+    priceVersionRepository.pricedModels.add('anthropic/claude-sonnet-4-6');
+    // An older page of other-model traces that must not eat the cap.
+    traceRepository.pending = [
+      pendingTrace({ traceId: 'gpt-old', startedAt: at(1) }),
+      pendingTrace({ traceId: 'sonnet', startedAt: at(2), model: SONNET }),
+    ];
+
+    const report = await sut.reprocess({ maxTraces: 1, model: SONNET });
+
+    expect(report.examined).toBe(1);
+    expect(traceRepository.stamps.map((stamp) => stamp.traceId)).toEqual([
+      'sonnet',
+    ]);
+  });
+
+  it('onlyWithModel: traces with no model are never examined — no price can stamp them', async () => {
+    const { sut, traceRepository } = makeSut();
+    traceRepository.pending = [
+      pendingTrace({ traceId: 'no-model', model: undefined, startedAt: at(1) }),
+      pendingTrace({ traceId: 'with-model', startedAt: at(2) }),
+    ];
+
+    const report = await sut.reprocess({ onlyWithModel: true });
+
+    expect(report.examined).toBe(1);
+    expect(traceRepository.stamps.map((stamp) => stamp.traceId)).toEqual([
+      'with-model',
+    ]);
+    // pendingRemaining stays the honest whole-queue count.
+    expect(report.pendingRemaining).toBe(1);
+  });
+
+  it('no options: the runbook path passes no filter and walks everything, as before', async () => {
+    const { sut, traceRepository } = makeSut();
+    traceRepository.pending = [
+      pendingTrace({ traceId: 'no-model', model: undefined }),
+    ];
+
+    const report = await sut.reprocess();
+
+    expect(report.examined).toBe(1);
+    expect(traceRepository.filtersSeen[0]).toEqual({});
+  });
+
+  it('MUST log how long the sweep took', async () => {
+    const traceRepository = new TraceRepositoryStub();
+    const logger = new RecordingLogger();
+    const readings = [500, 750.4];
+    const sut = new ReprocessPendingDbUseCase({
+      priceVersionRepository: new PriceVersionRepositoryStub(),
+      traceRepository,
+      billingPeriodRepository: new InMemoryBillingPeriodRepository(),
+      elapsedMs: () => readings.shift() as number,
+      logger,
+    });
+    traceRepository.pending = [pendingTrace({ traceId: 'open-july' })];
+
+    await sut.reprocess();
+
+    const finished = logger.lines.find(
+      (line) => line.message === 'Reprocess pending: sweep finished',
+    );
+
+    expect(finished?.fields).toMatchObject({ durationMs: 250 });
   });
 });
