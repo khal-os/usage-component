@@ -39,7 +39,8 @@ export class RegisterPriceVersionDbUseCase implements RegisterPriceVersionUseCas
   ): Promise<RegisteredPriceVersion> {
     // Same canonical key the stamper looks up (decision 82): a price
     // registered under a bare id lands under `provider/id` and matches.
-    const canonicalModel = modelKey(parseModelRef(input.model));
+    const modelRef = parseModelRef(input.model);
+    const canonicalModel = modelKey(modelRef);
 
     await this.priceVersionRepository.insertVersion({
       model: canonicalModel,
@@ -59,8 +60,13 @@ export class RegisterPriceVersionDbUseCase implements RegisterPriceVersionUseCas
     // a proxy timeout aborted the response while the loop kept running
     // (the retry then 409'd without re-running the sweep). The report's
     // pendingRemaining tells the operator what the backstop still owes.
+    // TARGETED (decision 183): only this model's traces — an untargeted
+    // capped run read the oldest page of the WHOLE queue, which could be
+    // all other-model or model-less traces and stamp nothing (seen on
+    // 2026-09-29: the sonnet-4-6 backlog was stamped by the worker, not here).
     const reprocess = await this.reprocessPending.reprocess({
       maxTraces: HTTP_REPROCESS_CAP,
+      model: modelRef,
     });
 
     return {

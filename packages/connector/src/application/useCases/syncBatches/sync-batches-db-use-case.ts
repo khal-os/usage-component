@@ -56,6 +56,7 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
   private readonly quietPeriodMs: number;
   private readonly concurrency: number;
   private readonly now: () => Date;
+  private readonly elapsedMs: () => number;
   private readonly logger: Logger;
 
   constructor(args: {
@@ -79,6 +80,8 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
     concurrency?: number;
     /** Test seam. */
     now?: () => Date;
+    /** Monotonic clock for the batch phase durations. Test seam. */
+    elapsedMs?: () => number;
     logger?: Logger;
   }) {
     this.traceBatchSource = args.traceBatchSource;
@@ -92,10 +95,15 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
     this.quietPeriodMs = args.quietPeriodMs;
     this.concurrency = args.concurrency ?? DEFAULT_INGESTION_CONCURRENCY;
     this.now = args.now ?? ((): Date => new Date());
+    this.elapsedMs = args.elapsedMs ?? ((): number => performance.now());
     this.logger = args.logger ?? nullLogger;
   }
 
   async syncNextBatch(): Promise<BatchSyncReport> {
+    // Phase durations for the batch log: a cycle's time was one number,
+    // and #102's lanes could not be judged against a ClickHouse fetch whose
+    // cost swings by minutes. fetchMs is the source read, writeMs the store.
+    const startedAt = this.elapsedMs();
     const cursor: SyncCursor | null =
       await this.syncStateRepository.getTraceCursor();
 
@@ -112,6 +120,7 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
       limit: this.batchSize,
       updatedBefore: new Date(now.getTime() - this.quietPeriodMs),
     });
+    const fetchedAt = this.elapsedMs();
 
     // Strict monotonicity or crash (audit A-3). fetchBatch queries
     // strictly AFTER the cursor tuple, so a legitimate next cursor is
@@ -247,6 +256,7 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
     // audit B-3 breaker: an all-fail non-trivial batch is a store outage,
     // not poison — throw BEFORE the bookmark, keeping the batch re-runnable.
     assertNotAllFailed(batch.traces.length, report.failed);
+    const writtenAt = this.elapsedMs();
 
     // Only now — the whole batch is in the store or dead-lettered (work
     // first, bookmark second). An empty batch keeps the cursor untouched.
@@ -265,6 +275,10 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
           ? { tokenDivergence: report.tokenDivergence }
           : {}),
         caughtUp: report.caughtUp,
+        concurrency: this.concurrency,
+        fetchMs: Math.round(fetchedAt - startedAt),
+        writeMs: Math.round(writtenAt - fetchedAt),
+        totalMs: Math.round(this.elapsedMs() - startedAt),
       });
     }
 

@@ -59,7 +59,8 @@ export const registerPriceVersionResponseSchema = z.strictObject({
   price_display: z.string(),
   effective_from: z.string(),
   effective_from_display: z.string(),
-  // Decision 57: what the new price immediately unblocked.
+  // Decision 57: what the new price immediately unblocked. Decision 183:
+  // examined/stamped/still_pending cover ONLY the registered model's traces.
   reprocess: z.strictObject({
     examined: z.number().int(),
     stamped: z.number().int(),
@@ -67,7 +68,7 @@ export const registerPriceVersionResponseSchema = z.strictObject({
     failed: z.number().int(),
     /** T6: pending traces of CLOSED months — untouched until an audited reopen. */
     blocked_closed_month: z.number().int(),
-    /** audit B-5: the HTTP run is capped — what the worker's sweep still owes. */
+    /** audit B-5: the WHOLE pending queue after this run, every model — not just this price's. */
     pending_remaining: z.number().int(),
   }),
 });

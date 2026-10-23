@@ -2,6 +2,7 @@ import { RegisterPriceVersionDbUseCase } from './register-price-version-db-use-c
 import {
   EffectivePrices,
   PriceVersionRepository,
+  ReprocessOptions,
   ReprocessPendingUseCase,
   ReprocessReport,
 } from './register-price-version-protocols.js';
@@ -28,6 +29,7 @@ class PriceVersionRepositoryStub implements PriceVersionRepository {
 
 class ReprocessPendingStub implements ReprocessPendingUseCase {
   calls = 0;
+  lastOptions: ReprocessOptions | undefined;
   report: ReprocessReport = {
     examined: 3,
     stamped: 2,
@@ -37,8 +39,9 @@ class ReprocessPendingStub implements ReprocessPendingUseCase {
     pendingRemaining: 0,
   };
 
-  async reprocess(): Promise<ReprocessReport> {
+  async reprocess(options?: ReprocessOptions): Promise<ReprocessReport> {
     this.calls += 1;
+    this.lastOptions = options;
 
     return this.report;
   }
@@ -103,6 +106,22 @@ describe('RegisterPriceVersionDbUseCase', () => {
       stillPending: 1,
       failed: 0,
       pendingRemaining: 0,
+    });
+  });
+
+  it('decision 183: MUST target the reprocess at the registered model, canonicalized, keeping the HTTP cap', async () => {
+    const { sut, reprocessPending } = makeSut();
+
+    await sut.register({
+      model: 'Claude-Sonnet-4-6',
+      tokenType: 'input',
+      priceMicrocentsPerMillion: 1_563_960_000,
+      effectiveFrom: JUNE_1,
+    });
+
+    expect(reprocessPending.lastOptions).toEqual({
+      maxTraces: 1_000,
+      model: { id: 'claude-sonnet-4-6', provider: 'anthropic' },
     });
   });
 
