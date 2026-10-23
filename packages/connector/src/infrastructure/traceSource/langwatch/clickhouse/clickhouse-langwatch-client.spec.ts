@@ -263,7 +263,10 @@ describe('ClickHouseLangWatchClient', () => {
 
     it('MUST bound the span query to the batch time window and the tenant, so it reads one partition, not the whole table', async () => {
       const early = summaryRow('trace-a', T0); // occurred T0 - 5s, lasts 1s
-      const late = { ...summaryRow('trace-b', T0 + 60_000), totalDurationMs: 30_000 };
+      const late = {
+        ...summaryRow('trace-b', T0 + 60_000),
+        totalDurationMs: 30_000,
+      };
       const { queryFn, calls } = makeQueryStub([[early, late], []]);
       const sut = makeSut(queryFn, 'project_abc');
 
@@ -276,8 +279,12 @@ describe('ClickHouseLangWatchClient', () => {
       const spans = calls[1];
 
       expect(spans?.query).toContain('FROM stored_spans FINAL');
-      expect(spans?.query).toContain('StartTime >= fromUnixTimestamp64Milli({spansFromMs:Int64})');
-      expect(spans?.query).toContain('StartTime <= fromUnixTimestamp64Milli({spansToMs:Int64})');
+      expect(spans?.query).toContain(
+        'StartTime >= fromUnixTimestamp64Milli({spansFromMs:Int64})',
+      );
+      expect(spans?.query).toContain(
+        'StartTime <= fromUnixTimestamp64Milli({spansToMs:Int64})',
+      );
       expect(spans?.query).toContain('AND TenantId = {tenantId:String}');
       expect(spans?.params).toMatchObject({
         traceIds: ['trace-a', 'trace-b'],
@@ -288,7 +295,10 @@ describe('ClickHouseLangWatchClient', () => {
     });
 
     it('MUST NOT add the tenant clause to the span query when no project id is configured', async () => {
-      const { queryFn, calls } = makeQueryStub([[summaryRow('trace-a', T0)], []]);
+      const { queryFn, calls } = makeQueryStub([
+        [summaryRow('trace-a', T0)],
+        [],
+      ]);
       const sut = makeSut(queryFn);
 
       await sut.fetchBatch({
