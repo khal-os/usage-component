@@ -181,6 +181,17 @@ de INPUT aplicado no mesmo trace → `costMicrocents(Σtokens, inputPrice)`.
 Traces sem preço de input carimbado ficam fora e são contados
 (`unpriceable_cache_read_traces`) — honestidade sobre a base da conta.
 
+Exibição do painel de cache (#111): os valores do painel são agregados do
+mês, portanto totais, e seguem o arredondamento de exibição do T5 (half-up,
+2 casas), não a precisão de linha. O painel mostra a própria conta ("diferença
+entre os dois acima", "bruta menos a gravação"), então os três valores medidos
+(custo real da leitura, contrafactual e gravação) arredondam uma vez e
+`savings` e `net_savings` são DERIVADOS desses centavos exibidos: as somas na
+tela sempre fecham. Consequência aceita: o derivado pode ficar até 1 centavo
+distante do arredondamento do valor exato em µ¢, que continua gravado no
+snapshot do mês fechado para auditoria. `net_positive` segue o líquido
+exibido, para a cor nunca contradizer o número.
+
 Teste de aceite de reprodutibilidade (T6): specs fecham um mês sintético,
 releem `billing_snapshot_usage`, rodam o motor de novo e exigem igualdade
 EXATA (ao centavo e ao µ¢) com `snapshot.statement`.
