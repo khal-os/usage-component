@@ -11,6 +11,7 @@ import {
 import { TraceAttribution } from '../../interfaces/trace-repository.js';
 import { ModelRef } from '../../../domain/models/model-ref.js';
 import { InMemoryBillingPeriodRepository } from '../../testSupport/billing-test-fakes.js';
+import { RecordingLogger } from '../../../common/logging/logging-test-fakes.js';
 
 /**
  * audit M2: the reprocess sweep finally gets its own spec — the closed-
@@ -485,5 +486,27 @@ describe('ReprocessPendingDbUseCase — resumable chunks and filters (decision 1
 
     expect(report.examined).toBe(1);
     expect(traceRepository.filtersSeen[0]).toEqual({});
+  });
+
+  it('MUST log how long the sweep took', async () => {
+    const traceRepository = new TraceRepositoryStub();
+    const logger = new RecordingLogger();
+    const readings = [500, 750.4];
+    const sut = new ReprocessPendingDbUseCase({
+      priceVersionRepository: new PriceVersionRepositoryStub(),
+      traceRepository,
+      billingPeriodRepository: new InMemoryBillingPeriodRepository(),
+      elapsedMs: () => readings.shift() as number,
+      logger,
+    });
+    traceRepository.pending = [pendingTrace({ traceId: 'open-july' })];
+
+    await sut.reprocess();
+
+    const finished = logger.lines.find(
+      (line) => line.message === 'Reprocess pending: sweep finished',
+    );
+
+    expect(finished?.fields).toMatchObject({ durationMs: 250 });
   });
 });
