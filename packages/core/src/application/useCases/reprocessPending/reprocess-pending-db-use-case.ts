@@ -39,21 +39,26 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
   private readonly priceVersionRepository: PriceVersionRepository;
   private readonly traceRepository: TraceRepository;
   private readonly billingPeriodRepository: BillingPeriodRepository;
+  private readonly elapsedMs: () => number;
   private readonly logger: Logger;
 
   constructor(args: {
     priceVersionRepository: PriceVersionRepository;
     traceRepository: TraceRepository;
     billingPeriodRepository: BillingPeriodRepository;
+    /** Monotonic clock for the sweep duration in the log. Test seam. */
+    elapsedMs?: () => number;
     logger?: Logger;
   }) {
     this.priceVersionRepository = args.priceVersionRepository;
     this.traceRepository = args.traceRepository;
     this.billingPeriodRepository = args.billingPeriodRepository;
+    this.elapsedMs = args.elapsedMs ?? ((): number => performance.now());
     this.logger = args.logger ?? nullLogger;
   }
 
   async reprocess(options?: ReprocessOptions): Promise<ReprocessReport> {
+    const startedAt = this.elapsedMs();
     // re-audit 2026-08 (sync item 6): the SAME closed-month key rule as
     // ingestion, imported instead of re-derived — trace-ingestor already
     // called these shared, and two copies of a month key is exactly how
@@ -124,7 +129,7 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
 
     report.pendingRemaining = await this.traceRepository.countPendingPrice();
 
-    this.logReport(report, filter);
+    this.logReport(report, filter, this.elapsedMs() - startedAt);
 
     return report;
   }
@@ -198,7 +203,11 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
     }
   }
 
-  private logReport(report: ReprocessReport, filter: PendingPriceFilter): void {
+  private logReport(
+    report: ReprocessReport,
+    filter: PendingPriceFilter,
+    durationMs: number,
+  ): void {
     this.logger.info('Reprocess pending: sweep finished', {
       // Decision 183: examined/stamped count only this scope;
       // pendingRemaining is always the whole queue.
@@ -215,6 +224,8 @@ export class ReprocessPendingDbUseCase implements ReprocessPendingUseCase {
       pendingRemaining: report.pendingRemaining,
       // Decision 183: false = capped mid-queue, the caller resumes from here.
       reachedEnd: report.resumeAfter === undefined,
+      // The worker runs a chunk between drains: its time delays the next one.
+      durationMs: Math.round(durationMs),
     });
   }
 }
