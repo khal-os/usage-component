@@ -203,12 +203,15 @@ class IngestFailureRepositoryStub implements IngestFailureRepository {
 const makeSut = (args?: {
   batchSize?: number;
   traceBatchSource?: TraceBatchSourceStub;
+  traceRepository?: TraceRepositoryStub;
+  concurrency?: number;
 }) => {
   const traceBatchSourceStub =
     args?.traceBatchSource ?? new TraceBatchSourceStub();
   const syncStateRepositoryStub = new SyncStateRepositoryStub();
   const priceVersionRepositoryStub = new PriceVersionRepositoryStub();
-  const traceRepositoryStub = new TraceRepositoryStub();
+  const traceRepositoryStub =
+    args?.traceRepository ?? new TraceRepositoryStub();
   const ingestFailureRepositoryStub = new IngestFailureRepositoryStub();
   const billingPeriodRepository = new InMemoryBillingPeriodRepository();
   const logger = new RecordingLogger();
@@ -222,6 +225,9 @@ const makeSut = (args?: {
     estimateDocumentBytes: (): number => 1024,
     batchSize: args?.batchSize ?? 2,
     quietPeriodMs: QUIET_MS,
+    ...(args?.concurrency === undefined
+      ? {}
+      : { concurrency: args.concurrency }),
     now: () => NOW,
     logger,
   });
@@ -510,5 +516,144 @@ describe('SyncBatchesDbUseCase', () => {
     };
 
     await expect(sut.syncNextBatch()).rejects.toThrow(/failed to advance/);
+  });
+
+  describe('session lanes (issue #102)', () => {
+    /** Holds every insert open for a few ticks so overlap is observable. */
+    class SlowTraceRepositoryStub extends TraceRepositoryStub {
+      inFlight = 0;
+      peak = 0;
+      bySession = new Map<string, number>();
+      sessionPeak = 0;
+
+      override async insertIfAbsent(
+        trace: TraceModel,
+      ): Promise<InsertIfAbsentResult> {
+        const session = trace.sessionId ?? trace.traceId;
+
+        this.inFlight += 1;
+        this.peak = Math.max(this.peak, this.inFlight);
+        this.bySession.set(session, (this.bySession.get(session) ?? 0) + 1);
+        this.sessionPeak = Math.max(
+          this.sessionPeak,
+          this.bySession.get(session) ?? 0,
+        );
+
+        for (let i = 0; i < 3; i += 1) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+
+        this.bySession.set(session, (this.bySession.get(session) ?? 1) - 1);
+        this.inFlight -= 1;
+
+        return super.insertIfAbsent(trace);
+      }
+    }
+
+    const tracesIn = (sessions: string[]): SourceTrace[] =>
+      sessions.map((sessionId, index) => ({
+        ...makeTrace(`trace-${index}`),
+        sessionId,
+      }));
+
+    it('MUST write traces of different sessions concurrently, up to the configured limit', async () => {
+      const slow = new SlowTraceRepositoryStub();
+      const { sut, traceBatchSourceStub, syncStateRepositoryStub } = makeSut({
+        batchSize: 10,
+        traceRepository: slow,
+        concurrency: 3,
+      });
+      const traces = tracesIn(['a', 'b', 'c', 'd', 'e', 'f']);
+
+      traceBatchSourceStub.batch = {
+        traces,
+        nextCursor: cursorOf('trace-5'),
+        scanned: traces.length,
+      };
+
+      const report = await sut.syncNextBatch();
+
+      expect(report.inserted).toBe(6);
+      expect(slow.peak).toBe(3);
+      expect(syncStateRepositoryStub.writes).toEqual([cursorOf('trace-5')]);
+    });
+
+    it('MUST keep traces of one session strictly one at a time', async () => {
+      const slow = new SlowTraceRepositoryStub();
+      const { sut, traceBatchSourceStub } = makeSut({
+        batchSize: 10,
+        traceRepository: slow,
+        concurrency: 8,
+      });
+      const traces = tracesIn(['s1', 's1', 's2', 's1', 's2', 's1']);
+
+      traceBatchSourceStub.batch = {
+        traces,
+        nextCursor: cursorOf('trace-5'),
+        scanned: traces.length,
+      };
+
+      await sut.syncNextBatch();
+
+      expect(slow.sessionPeak).toBe(1);
+      expect(
+        slow.inserted
+          .filter((trace) => trace.sessionId === 's1')
+          .map((trace) => trace.traceId),
+      ).toEqual(['trace-0', 'trace-1', 'trace-3', 'trace-5']);
+    });
+
+    it('MUST rethrow a systemic failure in one lane without advancing the cursor, while other lanes were in flight', async () => {
+      const slow = new SlowTraceRepositoryStub();
+      const {
+        sut,
+        traceBatchSourceStub,
+        syncStateRepositoryStub,
+        ingestFailureRepositoryStub,
+      } = makeSut({ batchSize: 10, traceRepository: slow, concurrency: 4 });
+      const traces = tracesIn(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+
+      traceBatchSourceStub.batch = {
+        traces,
+        nextCursor: cursorOf('trace-7'),
+        scanned: traces.length,
+      };
+      slow.failOn.add('trace-1');
+      slow.failWith = mongoNetworkError;
+
+      await expect(sut.syncNextBatch()).rejects.toThrow(
+        /connection 4 to mongo/,
+      );
+
+      expect(syncStateRepositoryStub.writes).toEqual([]);
+      expect(ingestFailureRepositoryStub.failures).toEqual([]);
+    });
+
+    it('MUST dead-letter a trace-shaped failure in one lane and keep the others going', async () => {
+      const slow = new SlowTraceRepositoryStub();
+      const {
+        sut,
+        traceBatchSourceStub,
+        syncStateRepositoryStub,
+        ingestFailureRepositoryStub,
+      } = makeSut({ batchSize: 10, traceRepository: slow, concurrency: 4 });
+      const traces = tracesIn(['a', 'b', 'c', 'd']);
+
+      traceBatchSourceStub.batch = {
+        traces,
+        nextCursor: cursorOf('trace-3'),
+        scanned: traces.length,
+      };
+      slow.failOn.add('trace-2');
+
+      const report = await sut.syncNextBatch();
+
+      expect(report.inserted).toBe(3);
+      expect(report.failed).toBe(1);
+      expect(
+        ingestFailureRepositoryStub.failures.map((f) => f.traceId),
+      ).toEqual(['trace-2']);
+      expect(syncStateRepositoryStub.writes).toEqual([cursorOf('trace-3')]);
+    });
   });
 });

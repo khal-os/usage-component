@@ -313,6 +313,16 @@ services:
         value: "60"
       - name: TRACE_INGESTION_BATCH_SIZE
         value: "1000"
+      # Issue #102: traces gravados ao mesmo tempo dentro do lote (1 = o laco
+      # sequencial antigo, teto 64). Traces da MESMA sessao ficam numa raia
+      # so, em ordem, porque o resumo da sessao e recalculado fora da
+      # transacao do insert. Erro por item: falha de formato do trace vai
+      # para ingest_failures e o lote segue; falha sistemica do banco (rede,
+      # primario caindo) impede novos inserts, espera os que estao em voo e
+      # aborta o lote sem avancar o cursor. Conflitos de escrita no contador
+      # de facetas sao refeitos pelo withTransaction do driver.
+      - name: TRACE_INGESTION_CONCURRENCY
+        value: "8"
       # Decisao 61: um trace precisa ficar PARADO este tempo antes de ser
       # ingerido. Ingerir no meio da execucao congela spans/tokens parciais no
       # preco para sempre.

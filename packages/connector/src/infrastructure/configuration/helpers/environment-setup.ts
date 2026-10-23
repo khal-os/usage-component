@@ -124,6 +124,10 @@ const envSchema = z
       'TRACE_INGESTION_QUIET_PERIOD_SECONDS',
       86_400,
     ),
+    TRACE_INGESTION_CONCURRENCY: optionalBoundedIntString(
+      'TRACE_INGESTION_CONCURRENCY',
+      64,
+    ),
     REPROCESS_INTERVAL_SECONDS: optionalBoundedIntString(
       'REPROCESS_INTERVAL_SECONDS',
       604_800,
@@ -141,6 +145,9 @@ const envSchema = z
       env.TRACE_INGESTION_QUIET_PERIOD_SECONDS
         ? parseInt(env.TRACE_INGESTION_QUIET_PERIOD_SECONDS, 10)
         : undefined,
+    TRACE_INGESTION_CONCURRENCY: env.TRACE_INGESTION_CONCURRENCY
+      ? parseInt(env.TRACE_INGESTION_CONCURRENCY, 10)
+      : undefined,
     REPROCESS_INTERVAL_SECONDS: env.REPROCESS_INTERVAL_SECONDS
       ? parseInt(env.REPROCESS_INTERVAL_SECONDS, 10)
       : undefined,
@@ -204,6 +211,7 @@ export const environment: EnvironmentVariables = {
   traceIngestionBatchSize: safeEnvironment.TRACE_INGESTION_BATCH_SIZE,
   traceIngestionQuietPeriodSeconds:
     safeEnvironment.TRACE_INGESTION_QUIET_PERIOD_SECONDS,
+  traceIngestionConcurrency: safeEnvironment.TRACE_INGESTION_CONCURRENCY,
   reprocessIntervalSeconds: safeEnvironment.REPROCESS_INTERVAL_SECONDS,
   ...toLoggingEnvironment(safeEnvironment, environmentContext),
 };

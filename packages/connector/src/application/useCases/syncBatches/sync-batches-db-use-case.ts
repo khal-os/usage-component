@@ -19,6 +19,11 @@ import { closedMonthKeys } from '@observability/core/domain/models/month-key.js'
 import { BillingPeriodRepository } from '@observability/core/application/interfaces/billing-period-repository.js';
 import { Logger } from '@observability/core/common/logging/logger.js';
 import { nullLogger } from '@observability/core/common/logging/null-logger.js';
+import { BatchPriceCache } from './batch-price-cache.js';
+import { runInLanes } from './run-in-lanes.js';
+
+/** Traces written at once by default (issue #102); same-session traces stay sequential. */
+export const DEFAULT_INGESTION_CONCURRENCY = 8;
 
 /**
  * One bounded step of the watermark loop (T2 continuous form). The
@@ -49,6 +54,7 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
   private readonly estimateDocumentBytes: EstimateDocumentBytes;
   private readonly batchSize: number;
   private readonly quietPeriodMs: number;
+  private readonly concurrency: number;
   private readonly now: () => Date;
   private readonly logger: Logger;
 
@@ -64,6 +70,13 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
     /** decision 61: only rows quiet for this long are eligible — the
      * source builds traces incrementally and the stamp is immutable. */
     quietPeriodMs: number;
+    /**
+     * issue #102: traces written at once. Each trace still costs its own
+     * round trips (price lookup, insert transaction, session recompute);
+     * running several at once overlaps that latency. 1 restores the old
+     * one-at-a-time loop.
+     */
+    concurrency?: number;
     /** Test seam. */
     now?: () => Date;
     logger?: Logger;
@@ -77,6 +90,7 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
     this.estimateDocumentBytes = args.estimateDocumentBytes;
     this.batchSize = args.batchSize;
     this.quietPeriodMs = args.quietPeriodMs;
+    this.concurrency = args.concurrency ?? DEFAULT_INGESTION_CONCURRENCY;
     this.now = args.now ?? ((): Date => new Date());
     this.logger = args.logger ?? nullLogger;
   }
@@ -147,67 +161,88 @@ export class SyncBatchesDbUseCase implements SyncBatchesUseCase {
       ? `cursor=(${cursor.updatedAt.toISOString()}, ${cursor.traceId})`
       : 'cursor=start';
 
-    for (const trace of batch.traces) {
-      try {
-        const result = await ingestSourceTrace(
-          {
-            priceVersionRepository: this.priceVersionRepository,
-            traceRepository: this.traceRepository,
-            billingPeriodRepository: this.billingPeriodRepository,
-            ingestFailureRepository: this.ingestFailureRepository,
-            estimateDocumentBytes: this.estimateDocumentBytes,
-            logger: this.logger,
-          },
-          trace,
-          closedMonths,
-        );
+    // issue #102: one price lookup per model interval instead of one per
+    // trace, rebuilt every batch so a newly registered price is seen next.
+    const priceVersionRepository = new BatchPriceCache(
+      this.priceVersionRepository,
+    );
 
-        if (result.quarantined) {
-          report.quarantined += 1;
-        }
+    // issue #102: up to `concurrency` traces in flight; traces of one
+    // session stay in one lane, in order (see runInLanes). A systemic error
+    // thrown below stops the batch exactly as the sequential loop did: the
+    // in-flight traces finish, the error propagates, the cursor stays put.
+    await runInLanes(
+      batch.traces,
+      (trace) =>
+        trace.sessionId
+          ? `session:${trace.sessionId}`
+          : `trace:${trace.traceId}`,
+      this.concurrency,
+      async (trace) => {
+        try {
+          const result = await ingestSourceTrace(
+            {
+              priceVersionRepository,
+              traceRepository: this.traceRepository,
+              billingPeriodRepository: this.billingPeriodRepository,
+              ingestFailureRepository: this.ingestFailureRepository,
+              estimateDocumentBytes: this.estimateDocumentBytes,
+              logger: this.logger,
+            },
+            trace,
+            closedMonths,
+          );
 
-        if (result.outcome === 'inserted') {
-          report.inserted += 1;
-
-          if (result.pendingPrice) {
-            report.pendingPrice += 1;
+          if (result.quarantined) {
+            report.quarantined += 1;
           }
 
-          continue;
-        }
+          if (result.outcome === 'inserted') {
+            report.inserted += 1;
 
-        if (result.tokenDivergence) {
-          report.tokenDivergence += 1;
-        }
+            if (result.pendingPrice) {
+              report.pendingPrice += 1;
+            }
 
-        report.skipped += 1;
-      } catch (error) {
-        // re-audit 2026-08 (sync item 2): an infra-class failure is not
-        // poison. Dead-lettering it would park good traces AND advance the
-        // watermark past them — the steady-state hole the ≥10 breaker
-        // cannot see (a caught-up worker runs 1–9-trace batches). Rethrow:
-        // the batch aborts BEFORE the bookmark, the cursor stays put.
-        if (isSystemicStoreError(error)) {
-          throw error;
-        }
+            return;
+          }
 
-        // audit B-3: per-trace isolation — the dead-letter row is the
-        // recovery trail; the batch continues and the cursor advances
-        // past the poison trace instead of re-reading it forever.
-        report.failed += 1;
-        this.logger.warn('Sync: trace failed ingestion and was dead-lettered', {
-          traceId: trace.traceId,
-          err: error,
-        });
-        await this.ingestFailureRepository.recordFailure({
-          traceId: trace.traceId,
-          kind: ingestFailureKindOf(error),
-          context,
-          error: String(error),
-          seenAt: new Date(),
-        });
-      }
-    }
+          if (result.tokenDivergence) {
+            report.tokenDivergence += 1;
+          }
+
+          report.skipped += 1;
+        } catch (error) {
+          // re-audit 2026-08 (sync item 2): an infra-class failure is not
+          // poison. Dead-lettering it would park good traces AND advance the
+          // watermark past them — the steady-state hole the ≥10 breaker
+          // cannot see (a caught-up worker runs 1–9-trace batches). Rethrow:
+          // the batch aborts BEFORE the bookmark, the cursor stays put.
+          if (isSystemicStoreError(error)) {
+            throw error;
+          }
+
+          // audit B-3: per-trace isolation — the dead-letter row is the
+          // recovery trail; the batch continues and the cursor advances
+          // past the poison trace instead of re-reading it forever.
+          report.failed += 1;
+          this.logger.warn(
+            'Sync: trace failed ingestion and was dead-lettered',
+            {
+              traceId: trace.traceId,
+              err: error,
+            },
+          );
+          await this.ingestFailureRepository.recordFailure({
+            traceId: trace.traceId,
+            kind: ingestFailureKindOf(error),
+            context,
+            error: String(error),
+            seenAt: new Date(),
+          });
+        }
+      },
+    );
 
     // audit B-3 breaker: an all-fail non-trivial batch is a store outage,
     // not poison — throw BEFORE the bookmark, keeping the batch re-runnable.
