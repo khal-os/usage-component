@@ -62,6 +62,25 @@ const startedInClosedMonthExpr = (
       };
 
 /**
+ * THE month bucket of a trace, stated once (decision 181): the CLIENT's
+ * calendar month, cut at the CLIENT's midnight — the same boundary
+ * `monthWindow` gives the summary and `$dateTrunc` gives the daily lens
+ * (decision 130). Mongo's bare `{ $year: '$startedAt' }` answers in UTC,
+ * which for a UTC-3 client files the last three local hours of every
+ * month under the NEXT one; the `{ date, timezone }` form is the fix, and
+ * Mongo resolves the IANA zone (DST included) natively.
+ *
+ * A FUNCTION, not a const, for the reason filterCounterStages spells out:
+ * a module-level evaluation would freeze whatever zone was — or was NOT —
+ * initialized at first import. The stages are built when the query RUNS.
+ */
+const clientMonthOf = (): Document => {
+  const date = { date: '$startedAt', timezone: clientTimezone() };
+
+  return { year: { $year: date }, month: { $month: date } };
+};
+
+/**
  * Billing reads the SAME traces collection the tabs read and sums the SAME
  * ingestion-time stamps (invariants 1 and 3). µ¢ sums stay exact: integers
  * below 2^53 are exact under Mongo's $sum.
@@ -83,10 +102,10 @@ export class MongoDbBillingQueryRepository implements BillingQueryRepository {
           : []),
         {
           $project: {
-            // $year/$month operate in UTC by default — same calendar-month
-            // boundary monthWindow uses for the summary.
-            year: { $year: '$startedAt' },
-            month: { $month: '$startedAt' },
+            // Decision 181: the CLIENT's calendar month — the same cut
+            // monthWindow makes for the summary, so /bills and
+            // /billing/summary cannot disagree (invariants 3 and 8).
+            ...clientMonthOf(),
             pricingStatus: 1,
             totalCostMicrocents: 1,
             docTokens: {
@@ -294,11 +313,6 @@ export class MongoDbBillingQueryRepository implements BillingQueryRepository {
   ): Promise<MonthlyRollupRow[]> {
     const traces = MongoDb.getCollection(TRACES_COLLECTION);
 
-    const monthOf = {
-      year: { $year: '$startedAt' },
-      month: { $month: '$startedAt' },
-    };
-
     // Two pipelines over the UNWOUND stamps — (month × agent × type) and
     // (month × model × type); every coarser sum (agent totals, month
     // totals, month type split) is assembled from them in JS.
@@ -321,7 +335,7 @@ export class MongoDbBillingQueryRepository implements BillingQueryRepository {
         {
           $group: {
             _id: {
-              ...monthOf,
+              ...clientMonthOf(),
               agentId: { $ifNull: ['$agent.id', null] },
               tokenType: '$stampedCosts.tokenType',
             },
@@ -337,7 +351,7 @@ export class MongoDbBillingQueryRepository implements BillingQueryRepository {
         {
           $group: {
             _id: {
-              ...monthOf,
+              ...clientMonthOf(),
               model: { $ifNull: ['$model', null] },
               tokenType: '$stampedCosts.tokenType',
             },

@@ -41,14 +41,14 @@ extraEgress:
 # foi buildada, e renderizar `:latest` no lugar seria pior que nao renderizar.
 pins:
   usage-module:
-    digest: "sha256:d17f4ed13760c8caa74ac9c9be8f1d820c527d43f9e19e5c0ca52490c318558c"
-    gitSha: "e7f69cdbaf54b1a61556e8a5a2acb273355cf98f"
+    digest: "sha256:6301a6f8ec0f6533afc300b7fdda531b30b162c51198b6b2e678e6527be98e75"
+    gitSha: "43958f3f46f7d7ecab13967a96f95d02bf55b7eb"
   usage-connector:
-    digest: "sha256:454973577c343db6ec1386a4cd2cbd75d66550b0230591ff694c299fafefab0c"
-    gitSha: "e7f69cdbaf54b1a61556e8a5a2acb273355cf98f"
+    digest: "sha256:74bfea03aef61ac3e7a5f5a7acb0c47d76a78ab6e2a410de0ce22a546b12355b"
+    gitSha: "43958f3f46f7d7ecab13967a96f95d02bf55b7eb"
   usage-db-backup:
-    digest: "sha256:07010dfe9b5871514dcd3445f159e29d27e021cfeed16b7a85eccd7b7178f914"
-    gitSha: "e7f69cdbaf54b1a61556e8a5a2acb273355cf98f"
+    digest: "sha256:73977713d50f5ff4123c97dc96331b293b6cdc8d21980b5f47c76e0ccc388ad7"
+    gitSha: "43958f3f46f7d7ecab13967a96f95d02bf55b7eb"
 
 services:
   api:
