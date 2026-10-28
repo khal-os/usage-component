@@ -1,68 +1,7 @@
-import { CloseBillingPeriodUseCase } from '@observability/core/domain/useCases/close-billing-period-use-case.js';
-import { ReopenBillingPeriodUseCase } from '@observability/core/domain/useCases/reopen-billing-period-use-case.js';
-import { SERVER_INSTRUCTIONS, buildMcpSurface } from './surface.js';
-import {
-  RecordingController,
-  fakeCodec,
-  fixedClock,
-  okResponse,
-} from './mcp-test-fakes.js';
+import { SERVER_INSTRUCTIONS } from './surface.js';
+import { testSurface } from './mcp-test-fakes.js';
 
-const controller = () => new RecordingController(okResponse({}));
-const never = (): never => {
-  throw new Error('not used in this suite');
-};
-
-const surface = buildMcpSurface({
-  identity: {
-    clientName: 'acme',
-    clientTimezone: 'America/Sao_Paulo',
-    tenant: 'acme',
-  },
-  traces: {
-    listTraces: controller(),
-    traceFilterOptions: controller(),
-    traceDetail: controller(),
-  },
-  sessions: {
-    listSessions: controller(),
-    sessionFilterOptions: controller(),
-    sessionDetail: controller(),
-  },
-  billing: {
-    listBills: controller(),
-    billingSummary: controller(),
-    billingSeries: controller(),
-    billingProjection: controller(),
-    statement: controller(),
-  },
-  prices: { listPrices: controller() },
-  overview: {
-    listBills: controller(),
-    billingProjection: controller(),
-    listPrices: controller(),
-  },
-  priceWrites: {
-    listPrices: controller(),
-    listBills: controller(),
-    registerPrice: controller(),
-    codec: fakeCodec(),
-    clock: fixedClock('2026-09-11T12:00:00.000Z'),
-  },
-  lifecycle: {
-    listBills: controller(),
-    billingSummary: controller(),
-    closeForActor: () => never() as unknown as CloseBillingPeriodUseCase,
-    reopenForActor: () => never() as unknown as ReopenBillingPeriodUseCase,
-    codec: fakeCodec(),
-    clock: fixedClock('2026-09-11T12:00:00.000Z'),
-  },
-  resources: {
-    openApiJson: () => '{}',
-    listBills: controller(),
-    listPrices: controller(),
-  },
-});
+const surface = testSurface();
 
 const names = surface.tools.map((tool) => tool.name);
 const byName = (name: string) =>

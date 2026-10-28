@@ -48,6 +48,14 @@ export interface ToolCaller {
   readonly subject: string;
   /** `tenant` claim, already checked against KHAL_TENANT by the gate. */
   readonly tenant: string;
+  /** Decision 184: the Khal team — the writes (prices, the month's lifecycle) are theirs. */
+  readonly master: boolean;
+  /**
+   * Decision 184: the module capabilities this person reaches, from the
+   * token's claim. Absent = no claim (Permissões off or shadow), where the
+   * door admits only the master and nothing else is restricted.
+   */
+  readonly capabilities?: ReadonlySet<string>;
 }
 
 /**
