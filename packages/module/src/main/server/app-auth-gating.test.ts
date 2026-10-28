@@ -23,7 +23,7 @@ import { registerMcpRoutes } from '../mcp/mcp-routes.js';
  * was the contract.
  */
 const rejectEverything: TokenAuthenticator = {
-  isAuthenticated: async () => false,
+  authenticate: async () => undefined,
 };
 
 /** The MCP door refuses everything too — its verifier is the one being tested. */
@@ -31,7 +31,14 @@ const rejectEverySession: SessionClaimsVerifier = {
   verify: async () => undefined,
 };
 
-const makeAppWithAuth = (options: { withMcp?: boolean } = {}) => {
+/** One app's token, as khal-auth mints it for that app (decision 184). */
+const tokenOf = (audience: string, role = 'member'): TokenAuthenticator => ({
+  authenticate: async () => ({ audience, role }),
+});
+
+const makeAppWithAuth = (
+  options: { withMcp?: boolean; authenticator?: TokenAuthenticator } = {},
+) => {
   const app = express();
   // Same sequence as app.ts: docs first, then /health, then (optionally) the
   // MCP endpoint, then auth, then the API routes, then the 404/error boundary.
@@ -56,7 +63,7 @@ const makeAppWithAuth = (options: { withMcp?: boolean } = {}) => {
       ),
     );
   }
-  app.use(buildAuthMiddleware(rejectEverything));
+  app.use(buildAuthMiddleware(options.authenticator ?? rejectEverything));
   const routes = setupV1Routes(app);
   setupErrorHandling(app, routes, nullLogger);
   return app;
@@ -101,6 +108,43 @@ describe('App auth gating (env-gated M2M bearer)', () => {
 
     await request(app).post('/api/v1/prices').expect(401);
   });
+  // Refused before any controller runs, so no store is needed: the default
+  // KHAL_TOKEN_AUDIENCE maps tracing → tracing.sessions, billing → billing.ledger.
+  it('MUST refuse a Tracing token the billing data, 403 (decision 184)', async () => {
+    const app = makeAppWithAuth({ authenticator: tokenOf('tracing') });
+
+    for (const path of [
+      '/api/v1/bills',
+      '/api/v1/billing/summary?year=2026&month=6',
+      '/api/v1/billing/statement?year=2026&month=6',
+      '/api/v1/prices',
+    ]) {
+      const response = await request(app)
+        .get(path)
+        .set('authorization', 'Bearer t')
+        .expect(403);
+      expect(response.body).toMatchObject({ name: 'ForbiddenError' });
+    }
+  });
+
+  it('MUST refuse a Billing token the traces and sessions, 403 (decision 184)', async () => {
+    const app = makeAppWithAuth({ authenticator: tokenOf('billing') });
+
+    for (const path of ['/api/v1/traces', '/api/v1/sessions/s-1']) {
+      await request(app).get(path).set('authorization', 'Bearer t').expect(403);
+    }
+  });
+
+  it('MUST keep registering a price the master’s, even with the billing data', async () => {
+    const app = makeAppWithAuth({ authenticator: tokenOf('billing', 'admin') });
+
+    await request(app)
+      .post('/api/v1/prices')
+      .set('authorization', 'Bearer t')
+      .send({})
+      .expect(403);
+  });
+
   /**
    * T12: the MCP endpoint carries its OWN gate, and its position in the
    * chain is the contract (decision 175) — mounted before the /api/v1 gate,

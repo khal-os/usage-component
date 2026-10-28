@@ -1,5 +1,8 @@
-import { jwtVerify } from 'jose';
-import { TokenAuthenticator } from '../../application/interfaces/token-authenticator.js';
+import { JWTPayload, jwtVerify } from 'jose';
+import {
+  SessionCaller,
+  TokenAuthenticator,
+} from '../../application/interfaces/token-authenticator.js';
 import { JwksKeySource, KeySet, isUnknownKidError } from './jwks-key-source.js';
 
 export interface SessionTokenAuthenticatorOptions {
@@ -61,11 +64,11 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
       });
   }
 
-  async isAuthenticated(token: string): Promise<boolean> {
+  async authenticate(token: string): Promise<SessionCaller | undefined> {
     const keySet = await this.keySource.current();
     // JWKS unreachable/malformed: uncached error — fail closed NOW, the
     // very next request re-fetches (an auth blip must not linger).
-    if (!keySet) return false;
+    if (!keySet) return undefined;
 
     const verdict = await this.verify(token, keySet);
     if (verdict !== 'unknown-kid') return verdict;
@@ -73,14 +76,15 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
     // The token names a kid the cached set lacks — keys may have rotated
     // since the fetch. Re-fetch ONCE and retry; still unknown → refuse.
     const fresh = await this.keySource.refresh();
-    if (!fresh) return false;
-    return (await this.verify(token, fresh)) === true;
+    if (!fresh) return undefined;
+    const retried = await this.verify(token, fresh);
+    return retried === 'unknown-kid' ? undefined : retried;
   }
 
   private async verify(
     token: string,
     keySet: KeySet,
-  ): Promise<boolean | 'unknown-kid'> {
+  ): Promise<SessionCaller | undefined | 'unknown-kid'> {
     try {
       const { payload } = await jwtVerify(token, keySet, {
         algorithms: ['RS256'],
@@ -88,9 +92,26 @@ export class SessionTokenAuthenticator implements TokenAuthenticator {
         // jose accepts an array natively: the token's `aud` must match ANY.
         audience: this.audiences,
       });
-      return payload.tenant === this.tenant;
+      if (payload.tenant !== this.tenant) return undefined;
+      return this.callerOf(payload);
     } catch (error) {
-      return isUnknownKidError(error) ? 'unknown-kid' : false;
+      return isUnknownKidError(error) ? 'unknown-kid' : undefined;
     }
+  }
+
+  /**
+   * Decision 184: which configured app the token was minted for decides the
+   * data it opens. jose already proved `aud` holds one of them; the first in
+   * the token's own order is the one that counts.
+   */
+  private callerOf(payload: JWTPayload): SessionCaller | undefined {
+    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    const audience = aud.find(
+      (entry): entry is string =>
+        typeof entry === 'string' && this.audiences.includes(entry),
+    );
+    if (audience === undefined) return undefined;
+    const role = payload['roles'];
+    return { audience, role: typeof role === 'string' ? role : '' };
   }
 }

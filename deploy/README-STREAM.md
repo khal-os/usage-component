@@ -98,7 +98,7 @@ Envs por ambiente (`envOverride` em `values-<env>.yaml`):
 | `BACKUP_BUCKET` | `hv-kos-usage-backups-dev` | `-hml` | `-prod` |
 
 `CLIENT_TIMEZONE=America/Sao_Paulo`, `CLIENT_NAME=hapvida`, `KHAL_TENANT=hapvida`,
-`KHAL_TOKEN_AUDIENCE=tracing,billing`, `MONGO_DB_ATLAS=true`, `LOG_LEVEL/FORMAT`
+`KHAL_TOKEN_AUDIENCE=tracing:tracing.sessions,billing:billing.ledger`, `MONGO_DB_ATLAS=true`, `LOG_LEVEL/FORMAT`
 sao iguais em todo ambiente e vivem em `deploy/values.yaml`.
 
 ---
