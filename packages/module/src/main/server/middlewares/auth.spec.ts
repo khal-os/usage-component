@@ -15,7 +15,8 @@ const makeApp = (authenticator?: TokenAuthenticator) => {
 };
 
 const authenticatorAnswering = (answer: boolean): TokenAuthenticator => ({
-  isAuthenticated: async () => answer,
+  authenticate: async () =>
+    answer ? { audience: 'tracing', role: 'member' } : undefined,
 });
 
 describe('Auth Middleware', () => {
@@ -58,9 +59,9 @@ describe('Auth Middleware', () => {
   it('MUST accept a lowercase `bearer` scheme (RFC 7235: schemes are case-insensitive)', async () => {
     const seen: string[] = [];
     const recording: TokenAuthenticator = {
-      isAuthenticated: async (token) => {
+      authenticate: async (token) => {
         seen.push(token);
-        return true;
+        return { audience: 'tracing', role: 'member' };
       },
     };
 
@@ -74,7 +75,7 @@ describe('Auth Middleware', () => {
 
   it('MUST answer 401 (fail closed) when the authenticator throws', async () => {
     const throwing: TokenAuthenticator = {
-      isAuthenticated: async () => {
+      authenticate: async () => {
         throw new Error('auth system down');
       },
     };

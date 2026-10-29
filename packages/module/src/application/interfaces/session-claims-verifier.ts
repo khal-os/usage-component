@@ -11,6 +11,14 @@ export interface SessionClaims {
   readonly role: string;
   /** `tenant` claim — already matched against KHAL_TENANT by the verifier. */
   readonly tenant: string;
+  /**
+   * Decision 184: the `capabilities` claim — what this person reaches of the
+   * module, as khal-auth computed it from the apps they received
+   * (khal-platform ADR-163). Absent = the claim is not there (Permissões off
+   * or shadow); a claim that is not a list of strings reads as an empty one,
+   * which opens nothing (a failure closes).
+   */
+  readonly capabilities?: readonly string[];
 }
 
 /**

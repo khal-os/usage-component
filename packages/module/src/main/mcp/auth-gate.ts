@@ -7,7 +7,12 @@ import {
   UnauthorizedError,
 } from '../../presentation/errors/index.js';
 
-/** v1 admits masters only (decision 176) — the same bar the platform's console writes have. */
+/**
+ * Without the `capabilities` claim (Permissões off or shadow) the door
+ * admits masters only, as v1 did (decision 176). With it, khal-auth already
+ * decided this person reaches the module (decision 184): any role enters,
+ * and sees only what the claim names.
+ */
 export const REQUIRED_ROLE = 'master';
 
 export interface McpAuthOptions {
@@ -94,7 +99,7 @@ export const authenticateMcp = async (
     return { ok: false };
   }
 
-  if (claims.role !== REQUIRED_ROLE) {
+  if (claims.capabilities === undefined && claims.role !== REQUIRED_ROLE) {
     options.logger.warn('mcp: role not allowed', { role: claims.role });
     res
       .status(403)
@@ -109,6 +114,13 @@ export const authenticateMcp = async (
 
   return {
     ok: true,
-    caller: { subject: claims.subject, tenant: claims.tenant },
+    caller: {
+      subject: claims.subject,
+      tenant: claims.tenant,
+      master: claims.role === REQUIRED_ROLE,
+      ...(claims.capabilities !== undefined && {
+        capabilities: new Set(claims.capabilities),
+      }),
+    },
   };
 };

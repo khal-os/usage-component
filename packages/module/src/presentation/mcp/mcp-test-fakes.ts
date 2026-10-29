@@ -1,5 +1,8 @@
+import { CloseBillingPeriodUseCase } from '@observability/core/domain/useCases/close-billing-period-use-case.js';
+import { ReopenBillingPeriodUseCase } from '@observability/core/domain/useCases/reopen-billing-period-use-case.js';
 import { Controller, HttpRequest, HttpResponse } from '../interfaces/index.js';
 import { ConfirmationCodec } from './confirmation.js';
+import { McpSurface, buildMcpSurface } from './surface.js';
 import { ToolCaller } from './tool-definition.js';
 
 /**
@@ -41,9 +44,11 @@ export const errorResponse = (
   msg: string,
 ): HttpResponse => ({ statusCode, body: { name, msg } });
 
+/** The master, as every MCP caller was before decision 184: no claim, the whole surface. */
 export const TEST_CALLER: ToolCaller = {
   subject: 'user_01',
   tenant: 'namastex',
+  master: true,
 };
 
 /**
@@ -124,3 +129,61 @@ export const priceRow = (
   effective_from: overrides.effective_from ?? '2026-05-01T00:00:00.000Z',
   effective_from_display: '01/05/2026',
 });
+
+const controller = () => new RecordingController(okResponse({}));
+const never = (): never => {
+  throw new Error('not used in this suite');
+};
+
+/** The whole surface over recording controllers: what the inventory specs read. */
+export const testSurface = (): McpSurface =>
+  buildMcpSurface({
+    identity: {
+      clientName: 'acme',
+      clientTimezone: 'America/Sao_Paulo',
+      tenant: 'acme',
+    },
+    traces: {
+      listTraces: controller(),
+      traceFilterOptions: controller(),
+      traceDetail: controller(),
+    },
+    sessions: {
+      listSessions: controller(),
+      sessionFilterOptions: controller(),
+      sessionDetail: controller(),
+    },
+    billing: {
+      listBills: controller(),
+      billingSummary: controller(),
+      billingSeries: controller(),
+      billingProjection: controller(),
+      statement: controller(),
+    },
+    prices: { listPrices: controller() },
+    overview: {
+      listBills: controller(),
+      billingProjection: controller(),
+      listPrices: controller(),
+    },
+    priceWrites: {
+      listPrices: controller(),
+      listBills: controller(),
+      registerPrice: controller(),
+      codec: fakeCodec(),
+      clock: fixedClock('2026-09-11T12:00:00.000Z'),
+    },
+    lifecycle: {
+      listBills: controller(),
+      billingSummary: controller(),
+      closeForActor: () => never() as unknown as CloseBillingPeriodUseCase,
+      reopenForActor: () => never() as unknown as ReopenBillingPeriodUseCase,
+      codec: fakeCodec(),
+      clock: fixedClock('2026-09-11T12:00:00.000Z'),
+    },
+    resources: {
+      openApiJson: () => '{}',
+      listBills: controller(),
+      listPrices: controller(),
+    },
+  });

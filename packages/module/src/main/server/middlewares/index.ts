@@ -7,3 +7,4 @@ export * from './not-found.js';
 export * from './error-handler.js';
 export * from './require-json.js';
 export * from './cache-headers.js';
+export * from './capability-guard.js';

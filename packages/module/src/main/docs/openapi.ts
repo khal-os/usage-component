@@ -93,6 +93,14 @@ const unauthorizedResponse = () =>
       'answers open (PoC behavior).',
   );
 
+/** Decision 184: a valid token of an app that does not read this route's data. */
+const forbiddenResponse = () =>
+  errorResponse(
+    "This token's app does not read this data: each app opens only the " +
+      'capabilities KHAL_TOKEN_AUDIENCE names for it (tracing.sessions, ' +
+      'billing.ledger). Registering a price also needs the master role.',
+  );
+
 const okResponse = (description: string, schema: z.ZodType) => ({
   description,
   content: { 'application/json': { schema: toSchema(schema) } },
@@ -257,6 +265,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '200': okResponse('Página de traces.', traceListResponseSchema),
           '400': errorResponse('Parâmetro de consulta inválido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -283,6 +292,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           ),
           '400': errorResponse('Parâmetro de consulta inválido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -300,6 +310,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '200': okResponse('Trace completo.', traceDetailResponseSchema),
           '400': errorResponse('Parâmetro de consulta desconhecido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '404': errorResponse('Trace não encontrado.'),
           '500': errorResponse('Erro interno.'),
         },
@@ -318,6 +329,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '200': okResponse('Página de sessões.', sessionListResponseSchema),
           '400': errorResponse('Parâmetro de consulta inválido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -339,6 +351,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           ),
           '400': errorResponse('Parâmetro de consulta inválido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -352,6 +365,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '200': okResponse('Agregados + cadeia (transcrição).', sessionDetailResponseSchema),
           '400': errorResponse('Parâmetro de consulta desconhecido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '404': errorResponse('Sessão não encontrada.'),
           '500': errorResponse('Erro interno.'),
         },
@@ -371,6 +385,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '200': okResponse('Faturas.', billListResponseSchema),
           '400': errorResponse('Parâmetro de consulta desconhecido (o endpoint não aceita parâmetros).'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -394,6 +409,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '200': okResponse('Extrato do mês.', billingSummaryResponseSchema),
           '400': errorResponse('Ano/mês ausentes, malformados ou parâmetro desconhecido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -435,6 +451,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
               'exige granularity=month).',
           ),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -451,6 +468,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           '200': okResponse('Projeção.', billingProjectionResponseSchema),
           '400': errorResponse('Parâmetro de consulta desconhecido (o endpoint não aceita parâmetros).'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -491,6 +509,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           },
           '400': errorResponse('Ano/mês/format ausentes, malformados ou parâmetro desconhecido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -531,6 +550,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           },
           '400': errorResponse('Parâmetro de consulta inválido.'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '500': errorResponse('Erro interno.'),
         },
       },
@@ -562,6 +582,7 @@ export const buildOpenApiDocument = (clientName?: string) => ({
           ),
           '400': errorResponse('Corpo inválido (campo ausente, malformado ou desconhecido).'),
           '401': unauthorizedResponse(),
+          '403': forbiddenResponse(),
           '409': errorResponse(
             'Versão já existe para (model, token_type, effective_from) — registre um novo effective_from.',
           ),

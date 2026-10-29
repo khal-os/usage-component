@@ -38,7 +38,18 @@ const claimsOf = (
     subject,
     role: typeof role === 'string' ? role : '',
     tenant,
+    ...capabilitiesOf(payload['capabilities']),
   };
+};
+
+/** Decision 184: absent stays absent; anything but a list of strings opens nothing. */
+const capabilitiesOf = (
+  claim: unknown,
+): { capabilities?: readonly string[] } => {
+  if (claim === undefined) return {};
+  const valid =
+    Array.isArray(claim) && claim.every((entry) => typeof entry === 'string');
+  return { capabilities: valid ? (claim as string[]) : [] };
 };
 
 /**

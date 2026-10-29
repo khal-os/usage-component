@@ -201,10 +201,11 @@ services:
       # esta setado — o boot recusa meio par.
       - name: KHAL_TENANT
         value: hapvida
-      # `aud` aceitos do token de sessao (qualquer entrada casa). Tracing e
-      # Billing sao os dois apps que leem os dados deste modulo.
+      # `aud` aceitos do token de sessao (qualquer entrada casa), cada um com o
+      # dado que o app le (decisao 184): Tracing le tracing.sessions, Billing
+      # le billing.ledger.
       - name: KHAL_TOKEN_AUDIENCE
-        value: tracing,billing
+        value: tracing:tracing.sessions,billing:billing.ledger
       # Atlas: SRV. A porta e ignorada quando ATLAS=true.
       - name: MONGO_DB_ATLAS
         value: "true"

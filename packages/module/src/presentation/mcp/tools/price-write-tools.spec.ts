@@ -217,7 +217,7 @@ describe('register_price (the confirming half)', () => {
 
     const outcome = await sut.register.run(
       { ...VALID_ARGS, confirmation_token },
-      { subject: 'user_99', tenant: TEST_CALLER.tenant },
+      { subject: 'user_99', tenant: TEST_CALLER.tenant, master: true },
     );
 
     expect(outcome.ok ? '' : outcome.error.code).toBe('CONFIRMATION_MISMATCH');
