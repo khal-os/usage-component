@@ -2,11 +2,14 @@ import { NextFunction, Request, Response } from 'express';
 import { TokenAuthenticator } from '../../../application/interfaces/token-authenticator.js';
 import { UnauthorizedError } from '../../../presentation/errors/index.js';
 
+/** Where the gate leaves the caller for the routes' capability guard (decision 184). */
+export const SESSION_CALLER = 'sessionCaller';
+
 /**
  * Env-gated bearer auth. Built WITHOUT an authenticator (KHAL_AUTH_URL
  * unset) it is a passthrough — the API stays open, PoC behavior. Built WITH
  * one, every request must carry `Authorization: Bearer <token>` that the
- * authenticator accepts (authenticated-or-not only).
+ * authenticator accepts; the caller it answers is kept on `res.locals`.
  *
  * Failures answer 401 directly — never next(err): the error boundary
  * flattens middleware 4xx into 400 InvalidParamError('body').
@@ -36,9 +39,11 @@ export const buildAuthMiddleware = (authenticator?: TokenAuthenticator) => {
     }
 
     authenticator
-      .isAuthenticated(token)
-      .then((authenticated) => {
-        if (authenticated) {
+      .authenticate(token)
+      .then((caller) => {
+        if (caller) {
+          // decision 184: the capability guard of each route reads who called
+          res.locals[SESSION_CALLER] = caller;
           next();
           return;
         }

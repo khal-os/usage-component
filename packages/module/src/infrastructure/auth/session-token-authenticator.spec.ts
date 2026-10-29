@@ -2,6 +2,12 @@ import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import type { JSONWebKeySet, JWK, KeyLike } from 'jose';
 import { SessionTokenAuthenticator } from './session-token-authenticator.js';
 
+/** The gate's yes or no: a caller came back (decision 184 made the answer the caller). */
+const accepted = async (
+  authenticator: SessionTokenAuthenticator,
+  token: string,
+): Promise<boolean> => (await authenticator.authenticate(token)) !== undefined;
+
 /**
  * Real crypto, fake transport: an RSA pair is generated in-test, tokens are
  * SIGNED with the private key, and global.fetch is stubbed to serve the
@@ -79,12 +85,26 @@ const makeSut = () =>
   });
 
 describe('SessionTokenAuthenticator', () => {
+  it('MUST answer the app the token was minted for and the role (decision 184)', async () => {
+    serveJwks(jwksOf(keys.publicJwk));
+    const token = await new SignJWT({ tenant: TENANT, roles: 'member' })
+      .setProtectedHeader({ alg: 'RS256', kid: 'key-1' })
+      .setIssuer(AUTH_URL)
+      .setAudience(['somebody-else', 'billing'])
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(keys.privateKey);
+
+    await expect(makeSut().authenticate(token)).resolves.toEqual({
+      audience: 'billing',
+      role: 'member',
+    });
+  });
+
   it('MUST accept a valid RS256 session token (right iss, aud, tenant, unexpired)', async () => {
     const mock = serveJwks(jwksOf(keys.publicJwk));
 
-    await expect(makeSut().isAuthenticated(await signToken())).resolves.toBe(
-      true,
-    );
+    await expect(accepted(makeSut(), await signToken())).resolves.toBe(true);
     expect(mock).toHaveBeenCalledWith(
       `${AUTH_URL}/.well-known/jwks.json`,
       expect.objectContaining({ signal: expect.anything() }),
@@ -96,7 +116,7 @@ describe('SessionTokenAuthenticator', () => {
 
     const forged = await signToken({ privateKey: rogueKeys.privateKey });
 
-    await expect(makeSut().isAuthenticated(forged)).resolves.toBe(false);
+    await expect(accepted(makeSut(), forged)).resolves.toBe(false);
   });
 
   it('MUST refuse a wrong `iss`', async () => {
@@ -104,7 +124,7 @@ describe('SessionTokenAuthenticator', () => {
 
     const token = await signToken({ issuer: 'https://evil.example.com' });
 
-    await expect(makeSut().isAuthenticated(token)).resolves.toBe(false);
+    await expect(accepted(makeSut(), token)).resolves.toBe(false);
   });
 
   it('MUST accept `aud=billing` — the second configured audience (Billing app)', async () => {
@@ -112,7 +132,7 @@ describe('SessionTokenAuthenticator', () => {
 
     const token = await signToken({ audience: 'billing' });
 
-    await expect(makeSut().isAuthenticated(token)).resolves.toBe(true);
+    await expect(accepted(makeSut(), token)).resolves.toBe(true);
   });
 
   it('MUST refuse an `aud` outside the configured list', async () => {
@@ -120,7 +140,7 @@ describe('SessionTokenAuthenticator', () => {
 
     const token = await signToken({ audience: 'metrics' });
 
-    await expect(makeSut().isAuthenticated(token)).resolves.toBe(false);
+    await expect(accepted(makeSut(), token)).resolves.toBe(false);
   });
 
   it('MUST still enforce the list when it has a single entry (backward compat)', async () => {
@@ -133,10 +153,10 @@ describe('SessionTokenAuthenticator', () => {
     });
 
     await expect(
-      sut.isAuthenticated(await signToken({ audience: 'tracing' })),
+      accepted(sut, await signToken({ audience: 'tracing' })),
     ).resolves.toBe(true);
     await expect(
-      sut.isAuthenticated(await signToken({ audience: 'billing' })),
+      accepted(sut, await signToken({ audience: 'billing' })),
     ).resolves.toBe(false);
   });
 
@@ -145,7 +165,7 @@ describe('SessionTokenAuthenticator', () => {
 
     const token = await signToken({ tenant: 'other-tenant' });
 
-    await expect(makeSut().isAuthenticated(token)).resolves.toBe(false);
+    await expect(accepted(makeSut(), token)).resolves.toBe(false);
   });
 
   it('MUST refuse an expired token', async () => {
@@ -155,22 +175,22 @@ describe('SessionTokenAuthenticator', () => {
       expiresAt: Math.floor(Date.now() / 1000) - 60,
     });
 
-    await expect(makeSut().isAuthenticated(token)).resolves.toBe(false);
+    await expect(accepted(makeSut(), token)).resolves.toBe(false);
   });
 
   it('MUST refuse garbage that is not a JWT at all', async () => {
     serveJwks(jwksOf(keys.publicJwk));
 
-    await expect(makeSut().isAuthenticated('not-a-jwt')).resolves.toBe(false);
+    await expect(accepted(makeSut(), 'not-a-jwt')).resolves.toBe(false);
   });
 
   it('MUST cache the JWKS in memory — one fetch across many verifications', async () => {
     const mock = serveJwks(jwksOf(keys.publicJwk));
     const sut = makeSut();
 
-    await expect(sut.isAuthenticated(await signToken())).resolves.toBe(true);
-    await expect(sut.isAuthenticated(await signToken())).resolves.toBe(true);
-    await expect(sut.isAuthenticated(await signToken())).resolves.toBe(true);
+    await expect(accepted(sut, await signToken())).resolves.toBe(true);
+    await expect(accepted(sut, await signToken())).resolves.toBe(true);
+    await expect(accepted(sut, await signToken())).resolves.toBe(true);
 
     expect(mock).toHaveBeenCalledTimes(1);
   });
@@ -191,14 +211,14 @@ describe('SessionTokenAuthenticator', () => {
 
     const sut = makeSut();
     // Warm the cache with the old key set…
-    await expect(sut.isAuthenticated(await signToken())).resolves.toBe(true);
+    await expect(accepted(sut, await signToken())).resolves.toBe(true);
 
     // …then a token signed by the rotated key forces exactly one re-fetch.
     const rotatedToken = await signToken({
       kid: 'key-2',
       privateKey: rotated.privateKey,
     });
-    await expect(sut.isAuthenticated(rotatedToken)).resolves.toBe(true);
+    await expect(accepted(sut, rotatedToken)).resolves.toBe(true);
     expect(mock).toHaveBeenCalledTimes(2);
   });
 
@@ -215,9 +235,9 @@ describe('SessionTokenAuthenticator', () => {
     const sut = makeSut();
     const token = await signToken();
 
-    await expect(sut.isAuthenticated(token)).resolves.toBe(false);
+    await expect(accepted(sut, token)).resolves.toBe(false);
     // Next request re-fetches and succeeds — an auth blip never lingers.
-    await expect(sut.isAuthenticated(token)).resolves.toBe(true);
+    await expect(accepted(sut, token)).resolves.toBe(true);
   });
 
   it('MUST fail closed on a non-200 JWKS answer', async () => {
@@ -227,8 +247,6 @@ describe('SessionTokenAuthenticator', () => {
     });
     global.fetch = mock as unknown as typeof fetch;
 
-    await expect(makeSut().isAuthenticated(await signToken())).resolves.toBe(
-      false,
-    );
+    await expect(accepted(makeSut(), await signToken())).resolves.toBe(false);
   });
 });

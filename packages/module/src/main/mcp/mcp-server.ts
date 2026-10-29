@@ -1,5 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  CallToolResult,
+  ErrorCode,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListToolsRequestSchema,
+  McpError,
+} from '@modelcontextprotocol/sdk/types.js';
 import { Logger } from '@observability/core/common/logging/logger.js';
 import {
   McpSurface,
@@ -10,6 +18,10 @@ import {
   ToolOutcome,
 } from '../../presentation/mcp/tool-definition.js';
 import { toolError } from '../../presentation/mcp/tool-error.js';
+import {
+  CallerSurface,
+  surfaceFor,
+} from '../../presentation/mcp/capabilities.js';
 import { registerDiscover } from './discover.js';
 
 export const SERVER_NAME = 'khal-usage-mcp';
@@ -86,12 +98,48 @@ export const guarded = async (
 };
 
 /**
+ * The SDK answers `tools/list` and `prompts/list` only once one is
+ * registered; a person who reaches none still gets the methods the server
+ * advertises, empty, and the answer the SDK gives an unknown name (decision
+ * 184). The openapi resource is everyone's, so resources are never empty.
+ */
+const registerEmptyLists = (
+  server: McpServer,
+  surface: CallerSurface,
+): void => {
+  if (surface.tools.length === 0) {
+    server.server.setRequestHandler(ListToolsRequestSchema, () => ({
+      tools: [],
+    }));
+    server.server.setRequestHandler(CallToolRequestSchema, (request) => ({
+      isError: true,
+      content: [
+        { type: 'text', text: `Tool ${request.params.name} not found` },
+      ],
+    }));
+  }
+  if (surface.prompts.length === 0) {
+    server.server.setRequestHandler(ListPromptsRequestSchema, () => ({
+      prompts: [],
+    }));
+    server.server.setRequestHandler(GetPromptRequestSchema, (request) => {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Prompt ${request.params.name} not found`,
+      );
+    });
+  }
+};
+
+/**
  * ONE server per request (decision 175): the SDK's transport is single-use,
  * and the tools close over the caller verified for THIS request — there is
  * no shared server whose identity could be confused between two sessions.
+ * Decision 184: only what the caller reaches is registered, so a tool of
+ * another app's data is neither listed nor callable (an unknown tool).
  */
 export const buildMcpServer = (
-  surface: McpSurface,
+  full: McpSurface,
   caller: ToolCaller,
   info: { version: string; logger: Logger },
 ): McpServer => {
@@ -99,6 +147,8 @@ export const buildMcpServer = (
     { name: SERVER_NAME, version: info.version },
     { capabilities: CAPABILITIES, instructions: SERVER_INSTRUCTIONS },
   );
+  const surface = surfaceFor(full, caller);
+  registerEmptyLists(server, surface);
 
   for (const tool of surface.tools) {
     server.registerTool(

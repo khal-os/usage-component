@@ -137,8 +137,9 @@ permanent archive — run it before any `down -v`).
 Auth (added post-PoC): env-gated SESSION auth on `/api/v1` — with
 `KHAL_AUTH_URL` set, every request needs a khal-auth session JWT, verified
 locally against the JWKS at `${KHAL_AUTH_URL}/.well-known/jwks.json`
-(RS256; `iss` == the URL, `aud` matching ANY entry of the comma-separated
-`KHAL_TOKEN_AUDIENCE`, default `tracing,billing`; `tenant` claim ==
+(RS256; `iss` == the URL, `aud` matching ANY app of the comma-separated
+`KHAL_TOKEN_AUDIENCE`, default `tracing:tracing.sessions,billing:billing.ledger`;
+`tenant` claim ==
 `KHAL_TENANT`, required with the URL; `exp`
 checked) — except `/api/v1/docs*` and `openapi.json`, which stay open as
 the container healthcheck and integration surface (decision 103; OPTIONS
@@ -147,14 +148,22 @@ preflight also bypasses), and `GET /health`, open by platform convention
 browser probe — registered after CORS, before the gate). Preflights from
 ALLOWED origins are answered 204 by the CORS middleware itself (decision
 174); unlisted origins still get no CORS answer at all. Identity-only, no scopes (ADR-95) — the module
-holds no scope logic, a platform invariant, not an omission.
+holds no scope logic, a platform invariant, not an omission. What a token
+opens is the data of its APP (decision 184): each route serves one
+capability (`tracing.sessions` or `billing.ledger`), a token opens only the
+capabilities its `KHAL_TOKEN_AUDIENCE` entry names (403 elsewhere), and
+`POST /prices` also needs the master role. A bare entry (`tracing`) opens
+everything, warned at boot.
 
 The MCP endpoint (T12, decisions 175–180) is a SECOND door with its own gate,
 mounted after CORS and before the `/api/v1` gate: `POST /mcp` exists only when
 `MCP_CANONICAL_URL` is set, and it verifies the session token STRICTLY against
-`MCP_AUDIENCE` (not the audience-tolerant list above), the `tenant` claim and
-`roles === 'master'`, answering 401 with the RFC 9728 challenge and 403 without
-one. Its tools call the same controllers the routes do; its writes are
+`MCP_AUDIENCE` (not the audience-tolerant list above) and the `tenant` claim,
+answering 401 with the RFC 9728 challenge and 403 without one. With the
+`capabilities` claim (khal-auth, Permissões in enforce) any role enters and the
+server registers only what the claim reaches (`presentation/mcp/capabilities.ts`;
+writes stay the master's; decision 184); without it, `roles === 'master'`
+(decision 176). Its tools call the same controllers the routes do; its writes are
 preview → confirm pairs signed with `MCP_CONFIRMATION_KEY`. The retired
 names (the discovery quartet, the interim `BASIC_AUTH_*` gate of decision
 141) have NO aliases. Nothing configured → API open (PoC behavior, loud

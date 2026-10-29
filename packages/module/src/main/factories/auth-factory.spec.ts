@@ -16,9 +16,19 @@ const loadFactory = async (config: {
   khalAuthUrl?: string;
   khalTenant?: string;
   khalTokenAudiences: string[];
+  khalAudienceCapabilities?: Record<string, readonly string[] | 'all'>;
 }): Promise<typeof import('./auth-factory.js').makeAuthMiddleware> => {
   jest.resetModules();
-  jest.doMock('../../infrastructure/index.js', () => ({ config }));
+  jest.doMock('../../infrastructure/index.js', () => ({
+    config: {
+      // The default KHAL_TOKEN_AUDIENCE (decision 184).
+      khalAudienceCapabilities: {
+        tracing: ['tracing.sessions'],
+        billing: ['billing.ledger'],
+      },
+      ...config,
+    },
+  }));
   jest.doMock('./logger-factory.js', () => ({
     makeLogger: () => ({
       warn: warnMock,
@@ -104,6 +114,21 @@ describe('makeAuthMiddleware (session gate wiring)', () => {
     } finally {
       global.fetch = originalFetch;
     }
+  });
+
+  it('MUST warn at boot when an app opens every route (the bare form, decision 184)', async () => {
+    const makeAuthMiddleware = await loadFactory({
+      khalAuthUrl: 'https://auth.khal-usage.com',
+      khalTenant: 'namastex',
+      khalTokenAudiences: ['tracing', 'billing'],
+      khalAudienceCapabilities: { tracing: 'all', billing: ['billing.ledger'] },
+    });
+
+    makeAuthMiddleware();
+
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining('names tracing without a capability'),
+    );
   });
 
   it('MUST fail closed (all 401) and log an error when KHAL_AUTH_URL is set without KHAL_TENANT', async () => {

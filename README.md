@@ -214,8 +214,9 @@ request must carry `Authorization: Bearer <session JWT>` issued by
 khal-auth. The module validates **locally**: RS256 signature against the
 JWKS at `${KHAL_AUTH_URL}/.well-known/jwks.json` (fetched once, cached in
 memory, re-fetched on an unknown `kid`), `iss` == `KHAL_AUTH_URL`, `aud` matching
-ANY entry of `KHAL_TOKEN_AUDIENCE` (comma-separated list, default
-`tracing,billing` — the Billing app reads this same module's data),
+ANY app of `KHAL_TOKEN_AUDIENCE` (comma-separated `app:capability` list,
+default `tracing:tracing.sessions,billing:billing.ledger`: each app's token
+opens only the routes of the data it reads, 403 elsewhere, decision 184),
 `tenant` claim == `KHAL_TENANT`,
 `exp` in the future. Identity-only — no scopes (ADR-95). Anything off —
 bad signature, wrong claim, expired token, JWKS unreachable — answers 401

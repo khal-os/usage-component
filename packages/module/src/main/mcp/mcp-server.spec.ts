@@ -8,7 +8,7 @@ import { ToolOutcome } from '../../presentation/mcp/tool-definition.js';
  * `error.message` verbatim, so a connection string or an internal class name
  * would travel to a language model and NOTHING would be logged.
  */
-const CALLER = { subject: 'user_01', tenant: 'acme' };
+const CALLER = { subject: 'user_01', tenant: 'acme', master: true };
 
 const context = () => {
   const logger = new RecordingLogger();

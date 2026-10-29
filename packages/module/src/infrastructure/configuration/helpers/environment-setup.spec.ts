@@ -104,6 +104,44 @@ describe('environment-setup', () => {
       expect(environment.khalTokenAudiences).toEqual(['tracing', 'billing']);
     });
 
+    it('MUST map each app to the capabilities it reads (decision 184)', async () => {
+      const environment = await loadEnvironment({
+        KHAL_TOKEN_AUDIENCE:
+          'tracing:tracing.sessions, billing:billing.ledger, costs:billing.ledger, costs:tracing.sessions',
+      });
+
+      expect(environment.khalTokenAudiences).toEqual([
+        'tracing',
+        'billing',
+        'costs',
+      ]);
+      expect(environment.khalAudienceCapabilities).toEqual({
+        tracing: ['tracing.sessions'],
+        billing: ['billing.ledger'],
+        costs: ['billing.ledger', 'tracing.sessions'],
+      });
+    });
+
+    it('MUST default each app to the data it reads (decision 184)', async () => {
+      const environment = await loadEnvironment();
+
+      expect(environment.khalAudienceCapabilities).toEqual({
+        tracing: ['tracing.sessions'],
+        billing: ['billing.ledger'],
+      });
+    });
+
+    it('MUST read a bare app (the older form) as opening everything', async () => {
+      const environment = await loadEnvironment({
+        KHAL_TOKEN_AUDIENCE: 'tracing,billing',
+      });
+
+      expect(environment.khalAudienceCapabilities).toEqual({
+        tracing: 'all',
+        billing: 'all',
+      });
+    });
+
     it("MUST treat '' (compose `${VAR:-}` defaults) as unset", async () => {
       const environment = await loadEnvironment({
         KHAL_AUTH_URL: '',

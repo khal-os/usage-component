@@ -176,7 +176,7 @@ describe('MCP tool arguments vs the HTTP query contract', () => {
 
       await tool?.run(
         { id: 'abc' },
-        { subject: 'user_01', tenant: 'namastex' },
+        { subject: 'user_01', tenant: 'namastex', master: true },
       );
 
       expect(recorder.requests).toEqual([{ params: { id: 'abc' }, query: {} }]);
