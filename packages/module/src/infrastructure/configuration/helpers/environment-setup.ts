@@ -64,6 +64,47 @@ const splitCommaList = (value: string): string[] =>
     .filter((entry) => entry.length > 0);
 
 /**
+ * Decision 184: KHAL_TOKEN_AUDIENCE names each app whose token reads this
+ * module, and what it reads: `tracing:tracing.sessions,billing:billing.ledger`.
+ * An app that reads two capabilities is named twice. A bare `tracing` (the
+ * older form) opens every capability. Exported for its spec.
+ */
+export const parseTokenAudiences = (
+  entries: readonly string[],
+): {
+  audiences: string[];
+  capabilities: Record<string, readonly string[] | 'all'>;
+} => {
+  const capabilities: Record<string, readonly string[] | 'all'> = {};
+  for (const entry of entries) {
+    const [audience = '', capability] = entry
+      .split(':', 2)
+      .map((part) => part.trim());
+    const current = capabilities[audience];
+    if (capability === undefined || current === 'all') {
+      capabilities[audience] = 'all';
+    } else {
+      capabilities[audience] = [...(current ?? []), capability];
+    }
+  }
+  return { audiences: Object.keys(capabilities), capabilities };
+};
+
+/** The two apps that read this module, each with the data it reads (decision 184). */
+const DEFAULT_TOKEN_AUDIENCES = [
+  'tracing:tracing.sessions',
+  'billing:billing.ledger',
+];
+
+/** An entry `app:` or `:capability` is a typo, never a choice. */
+const malformedAudience = (entry: string): boolean => {
+  const [audience = '', capability] = entry
+    .split(':', 2)
+    .map((part) => part.trim());
+  return audience === '' || capability === '';
+};
+
+/**
  * Bounded numeric knob (the connector's audit F-4 guard, same rationale):
  * a knob typo'd to 0 or garbage must fail the boot loudly, not configure a
  * busy-loop or a midnight-sharp close nobody chose. The resolved values
@@ -133,8 +174,8 @@ const envSchema = z
     KHAL_AUTH_URL: optionalNonEmptyString,
     KHAL_TENANT: optionalNonEmptyString,
     // Accepted `aud` values of the session JWT, comma-separated — a token
-    // matching ANY entry passes (the Tracing AND Billing apps read this
-    // module's data). Defaults to `tracing,billing` in the transform below.
+    // matching ANY entry passes, and opens the routes of the capabilities its
+    // entry names (decision 184). Defaults to DEFAULT_TOKEN_AUDIENCES.
     KHAL_TOKEN_AUDIENCE: optionalNonEmptyString,
     // audit D-1: cross-origin is an explicit operator act — exact origins,
     // comma-separated; unset/empty = same-origin only (no CORS headers).
@@ -188,7 +229,18 @@ const envSchema = z
         code: 'custom',
         message:
           'KHAL_TOKEN_AUDIENCE must name at least one audience ' +
-          '(comma-separated list, e.g. "tracing,billing")',
+          '(comma-separated list, e.g. "tracing:tracing.sessions,billing:billing.ledger")',
+      });
+    }
+    if (
+      env.KHAL_TOKEN_AUDIENCE &&
+      splitCommaList(env.KHAL_TOKEN_AUDIENCE).some(malformedAudience)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'KHAL_TOKEN_AUDIENCE entries are "app" or "app:capability" ' +
+          '(decision 184), never an empty app or capability',
       });
     }
 
@@ -252,9 +304,11 @@ const envSchema = z
   })
   .transform((env) => ({
     ...env,
-    KHAL_TOKEN_AUDIENCE: env.KHAL_TOKEN_AUDIENCE
-      ? splitCommaList(env.KHAL_TOKEN_AUDIENCE)
-      : ['tracing', 'billing'],
+    KHAL_TOKEN_AUDIENCE: parseTokenAudiences(
+      env.KHAL_TOKEN_AUDIENCE
+        ? splitCommaList(env.KHAL_TOKEN_AUDIENCE)
+        : DEFAULT_TOKEN_AUDIENCES,
+    ),
     SERVER_PORT: parseInt(env.SERVER_PORT, 10),
     BILLING_AUTO_CLOSE_DELAY_MINUTES: env.BILLING_AUTO_CLOSE_DELAY_MINUTES
       ? parseInt(env.BILLING_AUTO_CLOSE_DELAY_MINUTES, 10)
@@ -318,7 +372,8 @@ export const environment: EnvironmentVariables = {
   // '' → undefined already guaranteed by optionalNonEmptyString above.
   khalAuthUrl: safeEnvironment.KHAL_AUTH_URL,
   khalTenant: safeEnvironment.KHAL_TENANT,
-  khalTokenAudiences: safeEnvironment.KHAL_TOKEN_AUDIENCE,
+  khalTokenAudiences: safeEnvironment.KHAL_TOKEN_AUDIENCE.audiences,
+  khalAudienceCapabilities: safeEnvironment.KHAL_TOKEN_AUDIENCE.capabilities,
   corsAllowedOrigins: safeEnvironment.CORS_ALLOWED_ORIGINS,
   mcpCanonicalUrl: safeEnvironment.MCP_CANONICAL_URL,
   mcpConfirmationKey: safeEnvironment.MCP_CONFIRMATION_KEY,

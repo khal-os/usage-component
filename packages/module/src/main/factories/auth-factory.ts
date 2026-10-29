@@ -2,7 +2,10 @@ import { NextFunction, Request, Response } from 'express';
 import { JwksKeySource } from '../../infrastructure/auth/jwks-key-source.js';
 import { config } from '../../infrastructure/index.js';
 import { SessionTokenAuthenticator } from '../../infrastructure/auth/session-token-authenticator.js';
-import { buildAuthMiddleware } from '../server/middlewares/index.js';
+import {
+  buildAuthMiddleware,
+  buildCapabilityGuard,
+} from '../server/middlewares/index.js';
 import { makeLogger } from './logger-factory.js';
 
 /**
@@ -60,7 +63,18 @@ export const makeAuthMiddleware = (): ((
         'cannot be checked, so every /api/v1 request will answer 401 ' +
         '(fail closed)',
     );
-    return buildAuthMiddleware({ isAuthenticated: async () => false });
+    return buildAuthMiddleware({ authenticate: async () => undefined });
+  }
+
+  const opensEverything = Object.entries(config.khalAudienceCapabilities)
+    .filter(([, capabilities]) => capabilities === 'all')
+    .map(([audience]) => audience);
+  if (opensEverything.length > 0) {
+    authLogger.warn(
+      `KHAL_TOKEN_AUDIENCE names ${opensEverything.join(', ')} without a ` +
+        'capability, so its token reads EVERY route (decision 184): name ' +
+        'what each app reads, e.g. "tracing:tracing.sessions,billing:billing.ledger"',
+    );
   }
 
   return buildAuthMiddleware(
@@ -72,3 +86,12 @@ export const makeAuthMiddleware = (): ((
     }),
   );
 };
+
+/**
+ * Decision 184: each /api/v1 route's guard — a token opens only the
+ * capabilities of the app it was minted for (KHAL_TOKEN_AUDIENCE). With the
+ * gate off there is no caller and the guard lets everything through.
+ */
+export const requireCapability = buildCapabilityGuard(
+  config.khalAudienceCapabilities,
+);

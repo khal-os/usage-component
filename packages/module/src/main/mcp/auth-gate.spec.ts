@@ -159,8 +159,48 @@ describe('the MCP door (decision 176)', () => {
 
     expect(outcome).toEqual({
       ok: true,
-      caller: { subject: 'user_01', tenant: 'acme' },
+      caller: { subject: 'user_01', tenant: 'acme', master: true },
     });
     expect(sent.statusCode).toBeUndefined();
+  });
+});
+
+describe('the MCP door with Permissões (decision 184)', () => {
+  it('MUST admit any role whose token carries the capabilities claim', async () => {
+    const { outcome, sent } = await authenticate(
+      makeReq('Bearer ok'),
+      verifier({
+        ...MASTER,
+        role: 'member',
+        capabilities: ['tracing.sessions'],
+      }),
+    );
+
+    expect(outcome).toEqual({
+      ok: true,
+      caller: {
+        subject: 'user_01',
+        tenant: 'acme',
+        master: false,
+        capabilities: new Set(['tracing.sessions']),
+      },
+    });
+    expect(sent.statusCode).toBeUndefined();
+  });
+
+  it('MUST keep the claim on the master too: khal-auth decided what it reaches', async () => {
+    const { outcome } = await authenticate(
+      makeReq('Bearer ok'),
+      verifier({
+        ...MASTER,
+        capabilities: ['billing.ledger', 'tracing.sessions'],
+      }),
+    );
+
+    expect(outcome.ok && outcome.caller.master).toBe(true);
+    expect(outcome.ok && [...(outcome.caller.capabilities ?? [])]).toEqual([
+      'billing.ledger',
+      'tracing.sessions',
+    ]);
   });
 });

@@ -41,9 +41,16 @@ const MEMBER: SessionClaims = {
   tenant: 'acme',
 };
 
+/** Permissões in enforce: khal-auth names what this person's apps read (decision 184). */
+const TRACING_MEMBER: SessionClaims = {
+  ...MEMBER,
+  capabilities: ['tracing.sessions'],
+};
+
 const TOKENS: Record<string, SessionClaims> = {
   'master-token': MASTER,
   'member-token': MEMBER,
+  'tracing-token': TRACING_MEMBER,
 };
 
 const verifier: SessionClaimsVerifier = {
@@ -232,6 +239,54 @@ describe('POST /mcp', () => {
       expect(JSON.parse(result?.contents?.[0]?.text ?? '{}')).toHaveProperty(
         'items',
       );
+    });
+  });
+
+  describe('Permissões (decision 184)', () => {
+    it('MUST list only what the capabilities claim reaches', async () => {
+      const tools =
+        (await rpc('tools/list', {}, 'tracing-token')).result?.tools ?? [];
+      const prompts = (await rpc('prompts/list', {}, 'tracing-token')).result
+        ?.prompts;
+      const resources =
+        (await rpc('resources/list', {}, 'tracing-token')).result?.resources ??
+        [];
+
+      expect(tools.map((tool) => tool.name).sort()).toEqual([
+        'get_session',
+        'get_session_filter_options',
+        'get_trace',
+        'get_trace_filter_options',
+        'list_sessions',
+        'list_traces',
+      ]);
+      expect(prompts).toEqual([]);
+      expect(resources.map((resource) => resource.uri)).toEqual([
+        'usage://openapi.json',
+      ]);
+    });
+
+    it('MUST answer a tool of another app’s data as an unknown tool', async () => {
+      const result = await call('get_overview', {}, 'tracing-token');
+
+      expect(result?.isError).toBe(true);
+      expect(result?.content?.[0]?.text).toContain('not found');
+    });
+
+    it('MUST run a tool the claim reaches', async () => {
+      const result = await call('list_traces', {}, 'tracing-token');
+
+      expect(result?.isError).toBeUndefined();
+    });
+
+    it('MUST NOT read a resource of another app’s data', async () => {
+      const response = await rpc(
+        'resources/read',
+        { uri: 'usage://bills' },
+        'tracing-token',
+      );
+
+      expect(response.error?.message).toContain('not found');
     });
   });
 

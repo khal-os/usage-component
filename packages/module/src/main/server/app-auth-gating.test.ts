@@ -23,7 +23,7 @@ import { registerMcpRoutes } from '../mcp/mcp-routes.js';
  * was the contract.
  */
 const rejectEverything: TokenAuthenticator = {
-  isAuthenticated: async () => false,
+  authenticate: async () => undefined,
 };
 
 /** The MCP door refuses everything too — its verifier is the one being tested. */

@@ -27,6 +27,11 @@ export interface ServerEnvironmentVariables {
    * `tracing,billing`: both apps read this module's data).
    */
   khalTokenAudiences: string[];
+  /**
+   * Decision 184: what each app's token opens — its capabilities, or `all`
+   * for an app named without one (the older form of KHAL_TOKEN_AUDIENCE).
+   */
+  khalAudienceCapabilities: Readonly<Record<string, readonly string[] | 'all'>>;
   /** audit D-1: exact origins allowed cross-origin (comma-separated); unset = same-origin only. */
   corsAllowedOrigins?: string;
 }
