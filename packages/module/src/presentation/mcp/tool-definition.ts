@@ -56,6 +56,12 @@ export interface ToolCaller {
    * door admits only the master and nothing else is restricted.
    */
   readonly capabilities?: ReadonlySet<string>;
+  /**
+   * Decision 185: what this person may do in the module, as local ability ids.
+   * Absent = no claim, and nothing is restricted by ability. When present it
+   * decides, whatever else the token says.
+   */
+  readonly abilities?: ReadonlySet<string>;
 }
 
 /**

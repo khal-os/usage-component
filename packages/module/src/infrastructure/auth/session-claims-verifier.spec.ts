@@ -41,11 +41,13 @@ const sign = async (
     privateKey?: KeyLike;
     kid?: string;
     expiresIn?: string;
+    claims?: Record<string, unknown>;
   } = {},
 ): Promise<string> => {
   const payload: Record<string, unknown> = {
     tenant: overrides.tenant ?? TENANT,
     roles: overrides.roles ?? 'master',
+    ...overrides.claims,
   };
 
   const jwt = new SignJWT(payload)
@@ -86,6 +88,43 @@ describe('KhalAuthClaimsVerifier (the MCP door)', () => {
       role: 'master',
       tenant: TENANT,
     });
+  });
+
+  describe('the claims of a module released in Permissões (decision 185)', () => {
+    const claimsOf = async (claims: Record<string, unknown>) =>
+      makeSut().verify(await sign({ claims }));
+
+    it('MUST say enforce only when org is an object', async () => {
+      const org = { seesAll: false, places: [] };
+
+      expect(await claimsOf({ org })).toMatchObject({ enforced: true });
+      expect(await claimsOf({ org: 'x' })).not.toHaveProperty('enforced');
+      expect(await claimsOf({ org: ['x'] })).not.toHaveProperty('enforced');
+      expect(await claimsOf({ org: null })).not.toHaveProperty('enforced');
+    });
+
+    it('MUST hand over the local ids of this audience, and no one else’s', async () => {
+      const claims = await claimsOf({
+        abilities: [
+          `${AUDIENCE}.tracing.read`,
+          'other-mcp.billing.read',
+          'billing.read',
+        ],
+      });
+
+      expect(claims?.abilities).toEqual(['tracing.read']);
+    });
+
+    it('MUST leave abilities absent when the claim is absent', async () => {
+      expect(await claimsOf({})).not.toHaveProperty('abilities');
+    });
+
+    it.each([['x'], [[1]], [{}], [null]])(
+      'MUST read a malformed claim (%j) as empty: a failure closes',
+      async (abilities) => {
+        expect((await claimsOf({ abilities }))?.abilities).toEqual([]);
+      },
+    );
   });
 
   it('MUST refuse a token minted for another audience — even a valid platform one', async () => {

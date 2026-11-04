@@ -47,10 +47,18 @@ const TRACING_MEMBER: SessionClaims = {
   capabilities: ['tracing.sessions'],
 };
 
+/** The module released in Permissões, only "Ver traces e sessões" (decision 185). */
+const RELEASED_MEMBER: SessionClaims = {
+  ...MEMBER,
+  enforced: true,
+  abilities: ['tracing.read'],
+};
+
 const TOKENS: Record<string, SessionClaims> = {
   'master-token': MASTER,
   'member-token': MEMBER,
   'tracing-token': TRACING_MEMBER,
+  'released-token': RELEASED_MEMBER,
 };
 
 const verifier: SessionClaimsVerifier = {
@@ -239,6 +247,29 @@ describe('POST /mcp', () => {
       expect(JSON.parse(result?.contents?.[0]?.text ?? '{}')).toHaveProperty(
         'items',
       );
+    });
+  });
+
+  describe('a module released in Permissões (decision 185)', () => {
+    it('MUST list only what the abilities allow', async () => {
+      const tools =
+        (await rpc('tools/list', {}, 'released-token')).result?.tools ?? [];
+
+      expect(tools.map((tool) => tool.name).sort()).toEqual([
+        'get_session',
+        'get_session_filter_options',
+        'get_trace',
+        'get_trace_filter_options',
+        'list_sessions',
+        'list_traces',
+      ]);
+    });
+
+    it('MUST answer a tool the person was not given as an unknown tool', async () => {
+      const result = await call('export_statement', {}, 'released-token');
+
+      expect(result?.isError).toBe(true);
+      expect(result?.content?.[0]?.text).toContain('not found');
     });
   });
 

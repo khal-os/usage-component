@@ -8,10 +8,11 @@ import {
 } from '../../presentation/errors/index.js';
 
 /**
- * Without the `capabilities` claim (Permissões off or shadow) the door
- * admits masters only, as v1 did (decision 176). With it, khal-auth already
- * decided this person reaches the module (decision 184): any role enters,
- * and sees only what the claim names.
+ * In off and shadow the token says nothing about Permissões, and the door
+ * admits masters only, as v1 did (decision 176). In enforce khal-auth already
+ * decided this person reaches the module: the token carries `org` (decision
+ * 185), or `capabilities` while tokens from before it are alive (decision
+ * 184). Any role enters then, and sees only what the claims allow.
  */
 export const REQUIRED_ROLE = 'master';
 
@@ -99,7 +100,9 @@ export const authenticateMcp = async (
     return { ok: false };
   }
 
-  if (claims.capabilities === undefined && claims.role !== REQUIRED_ROLE) {
+  const decided = claims.enforced === true || claims.capabilities !== undefined;
+
+  if (!decided && claims.role !== REQUIRED_ROLE) {
     options.logger.warn('mcp: role not allowed', { role: claims.role });
     res
       .status(403)
@@ -120,6 +123,9 @@ export const authenticateMcp = async (
       master: claims.role === REQUIRED_ROLE,
       ...(claims.capabilities !== undefined && {
         capabilities: new Set(claims.capabilities),
+      }),
+      ...(claims.abilities !== undefined && {
+        abilities: new Set(claims.abilities),
       }),
     },
   };
