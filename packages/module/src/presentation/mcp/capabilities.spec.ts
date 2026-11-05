@@ -1,3 +1,9 @@
+import {
+  BILLING_EXPORT,
+  BILLING_READ,
+  MANIFEST_ABILITIES,
+  TRACING_READ,
+} from '../abilities.js';
 import { BILLING_LEDGER, TRACING_SESSIONS } from '../capabilities.js';
 import {
   PROMPT_NEEDS,
@@ -103,5 +109,117 @@ describe('who reaches what of the MCP surface (decision 184)', () => {
     expect(seen.prompts).toEqual([]);
     expect(namesOf(seen.resources)).toEqual(['openapi']);
     expect(reaches(caller(true), undefined)).toBe(false);
+  });
+});
+
+describe('what the company chose for a person (decision 185)', () => {
+  const withAbilities = (
+    master: boolean,
+    abilities: readonly string[],
+  ): ToolCaller => ({
+    subject: 'user_01',
+    tenant: 'acme',
+    master,
+    abilities: new Set(abilities),
+  });
+
+  it('MUST need only what the manifest declares', () => {
+    const declared = MANIFEST_ABILITIES.items.map((item) => item.id as string);
+    const needed = [
+      ...Object.values(TOOL_NEEDS),
+      ...Object.values(PROMPT_NEEDS),
+      ...Object.values(RESOURCE_NEEDS),
+    ].flatMap((need) => need.abilities);
+
+    expect([...new Set(needed)].sort()).toEqual([...declared].sort());
+  });
+
+  it('MUST declare areas for every ability, as the Module Catalog demands', () => {
+    const areas = MANIFEST_ABILITIES.areas.map((area) => area.id as string);
+
+    for (const item of MANIFEST_ABILITIES.items) {
+      expect(areas).toContain(item.id.split('.')[0]);
+    }
+  });
+
+  it('MUST give "Ver traces e sessões" only the trace and session reads', () => {
+    const seen = surfaceFor(surface, withAbilities(false, [TRACING_READ]));
+
+    expect(namesOf(seen.tools)).toEqual([
+      'get_session',
+      'get_session_filter_options',
+      'get_trace',
+      'get_trace_filter_options',
+      'list_sessions',
+      'list_traces',
+    ]);
+    expect(seen.prompts).toEqual([]);
+    expect(namesOf(seen.resources)).toEqual(['openapi']);
+  });
+
+  it('MUST keep the statement out of "Ver faturamento" alone', () => {
+    const seen = surfaceFor(surface, withAbilities(false, [BILLING_READ]));
+
+    expect(namesOf(seen.tools)).toEqual([
+      'get_billing_projection',
+      'get_billing_series',
+      'get_billing_summary',
+      'get_overview',
+      'list_bills',
+      'list_prices',
+    ]);
+    expect(namesOf(seen.prompts)).toEqual(['explain-bill']);
+    expect(namesOf(seen.resources)).toEqual(['bills', 'openapi', 'prices']);
+  });
+
+  it('MUST give "Exportar extrato" the statement and nothing else of billing', () => {
+    const seen = surfaceFor(surface, withAbilities(false, [BILLING_EXPORT]));
+
+    expect(namesOf(seen.tools)).toEqual(['export_statement']);
+    expect(seen.prompts).toEqual([]);
+  });
+
+  it('MUST open find-cost-driver only with the cost and the executions', () => {
+    const both = surfaceFor(
+      surface,
+      withAbilities(false, [BILLING_READ, TRACING_READ]),
+    );
+
+    expect(namesOf(both.prompts)).toEqual(['explain-bill', 'find-cost-driver']);
+  });
+
+  it('MUST keep the writes the master’s, whatever the abilities', () => {
+    const everything = [BILLING_READ, BILLING_EXPORT, TRACING_READ];
+
+    expect(
+      reaches(withAbilities(false, everything), TOOL_NEEDS['register_price']),
+    ).toBe(false);
+    expect(
+      reaches(withAbilities(true, everything), TOOL_NEEDS['register_price']),
+    ).toBe(true);
+  });
+
+  it('MUST close on an empty claim, and let it decide over old capabilities', () => {
+    const seen = surfaceFor(surface, withAbilities(false, []));
+
+    expect(seen.tools).toEqual([]);
+    expect(seen.prompts).toEqual([]);
+    expect(namesOf(seen.resources)).toEqual(['openapi']);
+    expect(
+      reaches(
+        {
+          ...withAbilities(false, []),
+          capabilities: new Set([BILLING_LEDGER]),
+        },
+        TOOL_NEEDS['list_bills'],
+      ),
+    ).toBe(false);
+  });
+
+  it('MUST restrict nothing but the writes when the token has no abilities at all', () => {
+    const seen = surfaceFor(surface, caller(false));
+
+    expect(namesOf(seen.tools)).toContain('export_statement');
+    expect(namesOf(seen.tools)).not.toContain('register_price');
   });
 });

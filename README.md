@@ -236,7 +236,10 @@ HTTP as **preview → confirm** pairs: price registration and the month
 lifecycle (decisions 175–180, story T12).
 
 Identity is the person's khal-auth session, never a machine token: 19 tools,
-4 guided prompts, 3 reference resources, master role only in v1.
+4 guided prompts, 3 reference resources. In off and shadow only the master
+enters. In enforce, whoever the company released the module to in Permissões
+enters, and sees what it chose among `Ver traces e sessões`, `Ver faturamento`
+and `Exportar extrato` (decision 185). The writes stay the master's.
 
 **Opt-in per deployment — three knobs.** With `MCP_CANONICAL_URL` unset no MCP
 route exists at all; set, it pulls the rest of the contract with it and a
