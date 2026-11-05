@@ -204,3 +204,50 @@ describe('the MCP door with Permissões (decision 184)', () => {
     ]);
   });
 });
+
+describe('the MCP door with a module released in Permissões (decision 185)', () => {
+  it('MUST admit any role whose token carries org, and hand over the abilities', async () => {
+    const { outcome, sent } = await authenticate(
+      makeReq('Bearer ok'),
+      verifier({
+        ...MASTER,
+        role: 'member',
+        enforced: true,
+        abilities: ['tracing.read'],
+      }),
+    );
+
+    expect(outcome).toEqual({
+      ok: true,
+      caller: {
+        subject: 'user_01',
+        tenant: 'acme',
+        master: false,
+        abilities: new Set(['tracing.read']),
+      },
+    });
+    expect(sent.statusCode).toBeUndefined();
+  });
+
+  it('MUST admit an admin of a module that declares nothing, with no restriction claim', async () => {
+    const { outcome } = await authenticate(
+      makeReq('Bearer ok'),
+      verifier({ ...MASTER, role: 'admin', enforced: true }),
+    );
+
+    expect(outcome).toEqual({
+      ok: true,
+      caller: { subject: 'user_01', tenant: 'acme', master: false },
+    });
+  });
+
+  it('MUST keep refusing a member when the token has abilities but no org', async () => {
+    const { outcome, sent } = await authenticate(
+      makeReq('Bearer ok'),
+      verifier({ ...MASTER, role: 'member', abilities: ['tracing.read'] }),
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(sent.statusCode).toBe(403);
+  });
+});
