@@ -24,8 +24,9 @@ export interface KhalAuthClaimsVerifierOptions {
 
 const claimsOf = (
   payload: Record<string, unknown>,
-  tenant: string,
+  expected: { readonly tenant: string; readonly audience: string },
 ): SessionClaims | undefined => {
+  const { tenant, audience } = expected;
   const subject = payload['sub'];
   const role = payload['roles'];
 
@@ -39,6 +40,8 @@ const claimsOf = (
     role: typeof role === 'string' ? role : '',
     tenant,
     ...capabilitiesOf(payload['capabilities']),
+    ...enforcedOf(payload['org']),
+    ...abilitiesOf(payload['abilities'], audience),
   };
 };
 
@@ -50,6 +53,34 @@ const capabilitiesOf = (
   const valid =
     Array.isArray(claim) && claim.every((entry) => typeof entry === 'string');
   return { capabilities: valid ? (claim as string[]) : [] };
+};
+
+/** Decision 185: only khal-auth in enforce signs an `org`; anything else is not it. */
+const enforcedOf = (claim: unknown): { enforced?: true } =>
+  typeof claim === 'object' && claim !== null && !Array.isArray(claim)
+    ? { enforced: true }
+    : {};
+
+/**
+ * Decision 185: the claim holds full ids, `<audience>.<area>.<action>`; only
+ * this audience's count, and the door works with the local part. Absent stays
+ * absent; anything but a list of strings opens nothing.
+ */
+const abilitiesOf = (
+  claim: unknown,
+  audience: string,
+): { abilities?: readonly string[] } => {
+  if (claim === undefined) return {};
+  if (!Array.isArray(claim)) return { abilities: [] };
+  if (!claim.every((entry) => typeof entry === 'string'))
+    return { abilities: [] };
+  const prefix = `${audience}.`;
+
+  return {
+    abilities: (claim as string[])
+      .filter((entry) => entry.startsWith(prefix))
+      .map((entry) => entry.slice(prefix.length)),
+  };
 };
 
 /**
@@ -103,7 +134,10 @@ export class KhalAuthClaimsVerifier implements SessionClaimsVerifier {
         audience: this.audience,
       });
 
-      return claimsOf(payload as Record<string, unknown>, this.tenant);
+      return claimsOf(payload as Record<string, unknown>, {
+        tenant: this.tenant,
+        audience: this.audience,
+      });
     } catch (error) {
       return isUnknownKidError(error) ? 'unknown-kid' : undefined;
     }

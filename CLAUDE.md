@@ -160,10 +160,12 @@ mounted after CORS and before the `/api/v1` gate: `POST /mcp` exists only when
 `MCP_CANONICAL_URL` is set, and it verifies the session token STRICTLY against
 `MCP_AUDIENCE` (not the audience-tolerant list above) and the `tenant` claim,
 answering 401 with the RFC 9728 challenge and 403 without one. With the
-`capabilities` claim (khal-auth, Permissões in enforce) any role enters and the
-server registers only what the claim reaches (`presentation/mcp/capabilities.ts`;
-writes stay the master's; decision 184); without it, `roles === 'master'`
-(decision 176). Its tools call the same controllers the routes do; its writes are
+`org` claim (khal-auth, Permissões in enforce, the module released to the person)
+any role enters and the server registers only what the `abilities` claim allows
+(`presentation/mcp/capabilities.ts`; absent = nothing restricted by ability;
+writes stay the master's; decision 185). A token from before it, with
+`capabilities`, still answers by that claim (decision 184). Without either,
+`roles === 'master'` (decision 176). Its tools call the same controllers the routes do; its writes are
 preview → confirm pairs signed with `MCP_CONFIRMATION_KEY`. The retired
 names (the discovery quartet, the interim `BASIC_AUTH_*` gate of decision
 141) have NO aliases. Nothing configured → API open (PoC behavior, loud
