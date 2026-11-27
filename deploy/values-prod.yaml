@@ -34,9 +34,6 @@ pins:
   usage-module:
     digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     gitSha: "0000000000000000000000000000000000000000"
-  usage-connector:
-    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    gitSha: "0000000000000000000000000000000000000000"
   usage-db-backup:
     digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     gitSha: "0000000000000000000000000000000000000000"
@@ -68,16 +65,6 @@ services:
       # Strict session-token `aud` on /mcp, derived by khal-auth from the
       # `usage` module of the Module Catalog: <module-id>-mcp (ADR-125).
       MCP_AUDIENCE: usage-mcp
-
-  trace-ingestion-worker:
-    envOverride:
-      ENVIRONMENT: production
-      MONGO_USAGE_DB_NAME: usage_db
-      LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch.svc.cluster.local:8123
-    extraEgress:
-      - namespace: kos-langwatch
-        ports:
-          - { protocol: TCP, port: 8123 }
 
   billing-close-scheduler:
     envOverride:

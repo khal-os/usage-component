@@ -10,10 +10,9 @@ for bin in git helm python3 jq; do command -v "$bin" >/dev/null || { echo "FALTA
 
 TRAB="$(mktemp -d)"; trap 'rm -rf "$TRAB"' EXIT
 D_MOD="sha256:$(printf 'a%.0s' $(seq 64))"
-D_CON="sha256:$(printf 'b%.0s' $(seq 64))"
 D_BAK="sha256:$(printf 'c%.0s' $(seq 64))"
 SHA1="$(printf 'd%.0s' $(seq 40))"
-BLOCO="{\"usage-module\":\"${D_MOD}\",\"usage-connector\":\"${D_CON}\",\"usage-db-backup\":\"${D_BAK}\"}"
+BLOCO="{\"usage-module\":\"${D_MOD}\",\"usage-db-backup\":\"${D_BAK}\"}"
 REG="278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos"
 
 # ── repo de trabalho com um commit de pin de verdade ────────────────────────
@@ -73,7 +72,7 @@ gate() { # gate <arquivo-json> [extra env...]
        ./deploy/verify-argo.sh hv-kos-components-dev dev "$PIN_SHA" "$PUSH_EPOCH" 2>&1 )
 }
 
-TODAS=("${REG}/usage-module@${D_MOD}" "${REG}/usage-connector@${D_CON}" "${REG}/usage-db-backup@${D_BAK}")
+TODAS=("${REG}/usage-module@${D_MOD}" "${REG}/usage-db-backup@${D_BAK}")
 DEPOIS="2023-11-14T22:15:00Z"   # > 1700000000
 ANTES="2023-11-14T21:00:00Z"    # < 1700000000
 
@@ -82,8 +81,8 @@ app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Succeeded "${TODAS[@]}" > "${TRAB}/
 SAIDA="$(gate "${TRAB}/ok.json")"
 contem "aprovado" "APROVADO" "$SAIDA"
 contem "le a revisao do formato single-source" "Application single-source" "$SAIDA"
-contem "conta as tres imagens" "3 imagem(ns) esperada(s)" "$SAIDA"
-contem "exige VIVAS so as de pod permanente" "2 EXIGIDA(S) VIVA(S)" "$SAIDA"
+contem "conta as duas imagens" "2 imagem(ns) esperada(s)" "$SAIDA"
+contem "exige VIVAS so as de pod permanente" "1 EXIGIDA(S) VIVA(S)" "$SAIDA"
 contem "separa a imagem so de CronJob"       "1 imagem(ns) so em CronJob/Job" "$SAIDA"
 
 titulo "reprova cada criterio, um de cada vez"
@@ -101,13 +100,13 @@ app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Failed "${TODAS[@]}" > "${TRAB}/6.j
 contem "operacao falhada no pin" "operationState.phase=Failed" "$(gate "${TRAB}/6.json")"
 
 titulo "a imagem que FALTA e a que reprova (conjunto, nao amostra)"
-# Este e o caso que uma verificacao de uma imagem so deixaria passar: a api
-# converge, o worker fica no digest anterior, e o cluster mistura duas versoes.
+# Este e o caso que uma verificacao de uma imagem so deixaria passar: o pod
+# permanente fica no digest anterior e o cluster serve versao misturada.
 app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Succeeded \
-  "${REG}/usage-module@${D_MOD}" "${REG}/usage-db-backup@${D_BAK}" > "${TRAB}/7.json"
+  "${REG}/usage-db-backup@${D_BAK}" > "${TRAB}/7.json"
 SAIDA="$(gate "${TRAB}/7.json")"
 contem "reprova por imagem faltante" "faltam em .status.summary.images" "$SAIDA"
-contem "diz QUAL faltou"             "usage-connector@${D_CON}"          "$SAIDA"
+contem "diz QUAL faltou"             "usage-module@${D_MOD}"             "$SAIDA"
 
 titulo "a imagem que so existe em CronJob NAO e criterio de vivacidade"
 # `.status.summary.images` e um retrato dos PODS da arvore de recursos. O CronJob
@@ -117,7 +116,7 @@ titulo "a imagem que so existe em CronJob NAO e criterio de vivacidade"
 # de um deploy que deu certo. Aqui o gate tem de APROVAR — e dizer, na evidencia,
 # que aquela imagem esta DECLARADA e nao foi medida viva.
 app_json Synced Healthy "$PIN_SHA" "$DEPOIS" Succeeded \
-  "${REG}/usage-module@${D_MOD}" "${REG}/usage-connector@${D_CON}" > "${TRAB}/8.json"
+  "${REG}/usage-module@${D_MOD}" > "${TRAB}/8.json"
 SAIDA="$(gate "${TRAB}/8.json")"
 contem "aprova sem o digest do CronJob" "APROVADO" "$SAIDA"
 contem "registra o digest do CronJob como sem pod agora" "sem pod agora: \`${REG}/usage-db-backup@${D_BAK}\`" "$SAIDA"
@@ -134,7 +133,7 @@ titulo "MULTI-SOURCE: a revisao vem de revisions[<indice da source do repo>]"
 # VAZIO. Lendo aquele campo o gate nunca via o pin, queimava os 900 s do deadline
 # e REPROVAVA um deploy correto — a pior forma de falso vermelho, porque parece
 # problema de cluster.
-VIVAS=("${REG}/usage-module@${D_MOD}" "${REG}/usage-connector@${D_CON}")
+VIVAS=("${REG}/usage-module@${D_MOD}")
 app_multi 1 "$PIN_SHA" "$(printf '7%.0s' $(seq 40))" Succeeded "${VIVAS[@]}" > "${TRAB}/m1.json"
 SAIDA="$(gate "${TRAB}/m1.json")"
 contem "aprova com revision vazio e revisions[1] == pin" "APROVADO" "$SAIDA"

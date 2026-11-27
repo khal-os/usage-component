@@ -29,6 +29,13 @@ com o "porque" em D10-D13 e os follow-ups em PENDENTE-10/11/12:
 | `default` do sprig trata `0` como vazio: uma `syncWave: 0` declarada a mao virava `-1` em silencio | `deploy/chart/templates/externalsecret.yaml` | leitura por `hasKey`, e o chart REPROVA wave do ES `>=` wave do Job (fixture `bad-es-wave.yaml`) (D15) |
 | premissas de nome (bucket, DB, ARN) espalhadas pelos PENDENTES | `deploy/README-STREAM.md` | tabela **assumido vs CONTRATO** (secao 3) — nenhum nome novo foi inventado |
 
+**Descomissionamento do LangWatch (2026-11-27)** — o LangWatch saiu do ar; o
+que mudou nesta stream:
+
+| achado | onde | correcao |
+| --- | --- | --- |
+| o `trace-ingestion-worker` (e a imagem `usage-connector`) ficou sem fonte de traces: sem ClickHouse o Deployment nunca fica `Available` e o gate de promocao (900 s, sem skip) REPROVA um deploy correto da api | `deploy/values*.yaml`, `deploy/__tests__/*`, `deploy/chart/*` | bloco e imagem removidos JUNTOS (o `gitops-pin.sh` exige o conjunto INTEIRO de `images:`; o guard do `services.sh` recusa imagem sem workload ou workload sem imagem); PENDENTE-10 resolvido — sem worker, nao ha pre-requisito de ordem |
+
 ---
 
 ## 1. O que foi entregue
@@ -63,28 +70,28 @@ deploy/
   verify-argo.sh                o gate: Synced+Healthy+revisao da source DESTE repo (multi-source, D14)
                                 +CONJUNTO de digests de pod permanente, sem skip (D10)
   bootstrap-eks-repo.sh         branches eks/*, vars, Environment prod-eks, auditoria (dry-run)
-  __tests__/                    5 suites, 260 asserces (run-all.sh)
+  __tests__/                    5 suites, 261 asserces (run-all.sh)
     fixtures/                   pins validos + 8 fixtures INVALIDAS (uma por forma de errar)
 .github/workflows/
   eks-ci.yml                    contrato do chart + scripts + actionlint + gitleaks
-  eks-deploy-dev.yml            UNICA lane que builda (matrix de 3 imagens) -> pin -> gate
+  eks-deploy-dev.yml            UNICA lane que builda (matrix de 2 imagens) -> pin -> gate
   eks-deploy-homolog.yml        promove de eks/dev por digest, 5 guards, retag hml-
   eks-deploy-main.yml           promove de eks/homolog, duplo gate + environment prod-eks
 ```
 
-### Os cinco workloads (CONTRATO §5, PLANO §3.2)
+### Os quatro workloads (CONTRATO §5, PLANO §3.2)
 
 | workload | kind | imagem | replicas | strategy | probes | grace | outros |
 |---|---|---|---|---|---|---|---|
 | `api` | Deployment | `usage-module` | 1 dev/hml, **2 prod** | RollingUpdate (surge 1 / unavail 0) | http `/health` | 30 s | Ingress `api-<env>.hapvida.khal.ai`, preset M, PDB em prod |
-| `trace-ingestion-worker` | Deployment | `usage-connector` | 1 | **Recreate** | exec `stat /tmp/trace-ingestion-heartbeat` | 60 s | PDB `maxUnavailable: 1` (D11), egress 8123 -> `kos-langwatch-<hml\|prod>`; unicidade garantida por `Recreate` + `replicas: 1` + schema |
 | `billing-close-scheduler` | Deployment | `usage-module` | 1 | **Recreate** | exec `stat /tmp/billing-close-heartbeat` | 60 s | **`enabled: false`** por padrao (decisao 131 e opt-in) |
 | `migrations` | Job (hook **PreSync**, wave `0`) | `usage-module` | — | — | exit 0 | 30 s | `backoffLimit: 0`, `activeDeadlineSeconds: 600`; o ES dele e hook PreSync wave `-1` (D15) |
 | `backup` | CronJob | `usage-db-backup` | — | — | exit 0 | — | `0 7 * * *` tz `America/Sao_Paulo`, `restartPolicy: Never`, IRSA `hv-kos-usage-backup-<env>` |
 
 Secrets (ESO, `dataFrom.extract`, "point, don't copy"):
-`/hapvida/<env>/kos/components/{app,mongo,langwatch}` — `mongo` e referenciado por
-cinco ExternalSecrets e existe UMA vez no Secrets Manager.
+`/hapvida/<env>/kos/components/{app,mongo}` — `mongo` e referenciado pelos tres
+ExternalSecrets renderizados e existe UMA vez no Secrets Manager. (O path
+`langwatch` deixou de ser consumido em 2026-11-27, com o descomissionamento.)
 
 Envs por ambiente (`envOverride` em `values-<env>.yaml`):
 
@@ -92,7 +99,6 @@ Envs por ambiente (`envOverride` em `values-<env>.yaml`):
 |---|---|---|---|
 | `ENVIRONMENT` | `homolog` | `homolog` | `production` |
 | `KHAL_AUTH_URL` | `https://auth-dev.hapvida.khal.ai` | `https://auth-hml.hapvida.khal.ai` | `https://auth.hapvida.khal.ai` |
-| `LANGWATCH_CLICKHOUSE_URL` | `http://clickhouse.kos-langwatch-hml.svc.cluster.local:8123` | idem | `http://clickhouse.kos-langwatch.svc.cluster.local:8123` |
 | `CORS_ALLOWED_ORIGINS` | `https://hapvida-dev.khal.ai,https://*.hapvida.khal.ai` | `https://hapvida-hml.khal.ai,…` | `https://hapvida.khal.ai,…` |
 | `MONGO_USAGE_DB_NAME` | `hapvida_dev` | `hapvida_hml` | `hapvida` |
 | `BACKUP_BUCKET` | `hv-kos-usage-backups-dev` | `-hml` | `-prod` |
@@ -396,16 +402,16 @@ $ helm lint deploy/chart -f deploy/values.yaml -f deploy/values-dev.yaml -f depl
 1 chart(s) linted, 0 chart(s) failed
 
 $ helm template … (objetos renderizados por ambiente)
-dev :  1 CronJob  2 Deployment  4 ExternalSecret  1 Ingress  1 Job  5 NetworkPolicy  1 PDB  1 Service  4 ServiceAccount
-hml :  1 CronJob  2 Deployment  4 ExternalSecret  1 Ingress  1 Job  5 NetworkPolicy  1 PDB  1 Service  4 ServiceAccount
-prod:  1 CronJob  2 Deployment  4 ExternalSecret  1 Ingress  1 Job  5 NetworkPolicy  2 PDB  1 Service  4 ServiceAccount
+dev :  1 CronJob  1 Deployment  3 ExternalSecret  1 Ingress  1 Job  4 NetworkPolicy  1 Service  3 ServiceAccount
+hml :  1 CronJob  1 Deployment  3 ExternalSecret  1 Ingress  1 Job  4 NetworkPolicy  1 Service  3 ServiceAccount
+prod:  1 CronJob  1 Deployment  3 ExternalSecret  1 Ingress  1 Job  4 NetworkPolicy  1 PDB  1 Service  3 ServiceAccount
   (0 `kind: Secret`, 0 `imagePullSecrets` nos tres — asserido pelo teste)
 
 $ … | grep -B2 sync-wave        # a ordem do hook, nos tres ambientes
 Job/migrations           hook: PreSync  hook-delete-policy: BeforeHookCreation  sync-wave: "0"
 ExternalSecret/migrations-env  hook: PreSync  hook-delete-policy: BeforeHookCreation  sync-wave: "-1"
                                target: creationPolicy: Orphan  deletionPolicy: Retain
-ExternalSecret/{api,trace-ingestion-worker,backup}-env  sem hook, sem wave, creationPolicy: Owner
+ExternalSecret/{api,backup}-env  sem hook, sem wave, creationPolicy: Owner
 
 $ helm template … -f deploy/__tests__/fixtures/bad-es-wave.yaml   # ES na wave do Job
 Error: execution error at (kos-components/templates/externalsecret.yaml:99:4):
@@ -474,18 +480,15 @@ continua entrando no Service;
 `GIT_SHA` em todo workload) e preencher `health.version`.
 
 **PENDENTE-2 — `LANGWATCH_PROJECT_ID` via SSM ParameterStore.**
-O CONTRATO §4 lista `SSM /hapvida/<env>/kos/components/langwatch-project-id`, mas
-um `ExternalSecret` com provider ParameterStore exige um **ClusterSecretStore
-proprio** (`hapvida-dev`/`hapvida-prod` apontam para o Secrets Manager) e a
-policy do ESO precisa de `ssm:GetParameter`. Nenhuma das duas coisas existe, e
-criar CSS e da stream A/foundation. **Por ora** `LANGWATCH_PROJECT_ID` entra no
-JSON `/hapvida/<env>/kos/components/langwatch`, junto de
-`LANGWATCH_CLICKHOUSE_PASSWORD`. Quando o CSS de ParameterStore existir, basta
-somar um segundo path a `services.trace-ingestion-worker.secrets` — o chart ja
-renderiza N `extract` por workload.
-⚠ O parser do connector trata `LANGWATCH_PROJECT_ID` em branco como UNSET (o
-placeholder do SSM era `" "`), e sem ele o worker fica **ocioso** em vez de
-ingerir errado. O comportamento e seguro; a omissao e visivel no log de boot.
+**OBSOLETO em 2026-11-27**: o unico consumidor (`trace-ingestion-worker`) foi
+removido com o descomissionamento do LangWatch (PENDENTE-10). Fica como registro
+do desenho: o CONTRATO §4 listava
+`SSM /hapvida/<env>/kos/components/langwatch-project-id`, mas um `ExternalSecret`
+com provider ParameterStore exige um **ClusterSecretStore proprio**
+(`hapvida-dev`/`hapvida-prod` apontam para o Secrets Manager) e a policy do ESO
+precisa de `ssm:GetParameter` — nenhuma das duas existe, e criar CSS e da stream
+A/foundation. O chart segue pronto: renderiza N `extract` por workload, e um
+futuro consumidor so precisa somar o path ao proprio ES.
 
 **PENDENTE-3 — nomes de bucket e de role de IRSA a confirmar com a stream A.**
 (Linha `BACKUP_BUCKET` e linha do `irsaRoleArn` na tabela da secao 3.)
@@ -503,8 +506,8 @@ um nome errado nao falha: ele arquiva no lugar errado.
 
 **PENDENTE-5 — probe de heartbeat mede EXISTENCIA, nao FRESCOR.**
 O compose compara a idade do arquivo contra `2x intervalo + 120s`. Aqui o probe
-e `stat` puro: um worker que travou DEPOIS do primeiro batch continua "vivo"
-para o kubelet. Aritmetica de data dentro de `sh -c` num probe e fragil de ler e
+e `stat` puro: um laco que travou DEPOIS do primeiro batch continua "vivo"
+para o kubelet (o caso era o `trace-ingestion-worker`, removido em 2026-11-27). Aritmetica de data dentro de `sh -c` num probe e fragil de ler e
 de manter, e a alternativa boa e a mesma do PENDENTE-1 (um `/readyz` honesto no
 proprio processo). Ate la, a deteccao real de stall continua sendo o alarme de
 ingestao, nao o kubelet.
@@ -534,24 +537,28 @@ Nem em dry-run: qualquer execucao faz chamadas ao GitHub, e esta fase e de
 mutacao externa ZERO. So passou por `bash -n`. A primeira execucao deve ser
 `deploy/bootstrap-eks-repo.sh khal-os/usage-component` (sem `--apply`).
 
-**PENDENTE-10 — ORDEM DE SUBIDA: LangWatch ANTES de `kos-components-<env>`.**
-**Bloqueante para a stream E.** O `trace-ingestion-worker` depende do ClickHouse
-do LangWatch (`kos-langwatch-hml` para dev **e** hml, `kos-langwatch` para prod,
-CONTRATO §3). A dependencia NAO e do probe: sem fonte configurada o processo sai
-1 de proposito (`packages/connector/src/main/jobs/run-trace-ingestion-loop.ts`,
-audit G-1 — "crash loop VISIVEL em vez de ocioso verde"), e com fonte porem sem
-ClickHouse alcancavel `assertCompatibleSchema()` e fatal no boot. Nos dois casos
-o Deployment nunca fica `Available`, a Application nunca fica `Healthy` e o gate
-(sem ramo de skip, 900 s) REPROVA um deploy da api que estava correto.
-Por isso `hv-kos-langwatch-hml` tem de estar `Healthy` **antes** do primeiro sync
-de `hv-kos-components-dev` (e o mesmo vale para hml e prod).
-*Por que nao "desligar o worker em dev e pronto"*: nao ha meia-volta barata. As
-lanes de promocao montam o bloco de digests a partir das imagens RENDERIZADAS na
-origem, e o `gitops-pin.sh` recusa bloco parcial (o conjunto de `images:` e o
-contrato); desligar so este workload num ambiente faria `usage-connector` sumir
-do bloco e a promocao falhar. Desligar na FORMA (`deploy/values.yaml`) exigiria
-tirar `usage-connector` de `images:` — o que apaga o build da imagem e o guard de
-coerencia do `services.sh`. A ordem e o caminho.
+**PENDENTE-10 — RESOLVIDO em 2026-11-27 (o LangWatch foi descomissionado).**
+Historico: o `trace-ingestion-worker` dependia do ClickHouse do LangWatch
+(`kos-langwatch-hml` para dev **e** hml, `kos-langwatch` para prod, CONTRATO §3).
+Sem fonte configurada o processo saia 1 de proposito
+(`packages/connector/src/main/jobs/run-trace-ingestion-loop.ts`, audit G-1 —
+"crash loop VISIVEL em vez de ocioso verde"), e com fonte porem sem ClickHouse
+alcancavel `assertCompatibleSchema()` era fatal no boot. Nos dois casos o
+Deployment nunca ficava `Available`, a Application nunca ficava `Healthy` e o
+gate (sem ramo de skip, 900 s) REPROVAVA um deploy da api que estava correto —
+por isso a ordem (LangWatch `Healthy` ANTES do primeiro sync de
+`kos-components-<env>`) era BLOQUEANTE. Desligar so o workload nao era saida: as
+lanes montam o bloco de digests a partir das imagens RENDERIZADAS na origem, o
+`gitops-pin.sh` recusa bloco parcial, e tirar `usage-connector` de `images:`
+apagava o build da imagem.
+**Resolucao**: o conector `langwatch` saiu do catalogo do tenant hapvida e a
+instancia `kos-langwatch` foi derrubada; o bloco do `trace-ingestion-worker` e a
+imagem `usage-connector` foram removidos de `deploy/values*.yaml` — JUNTOS, pela
+mesma razao invertida (o pin exige o conjunto INTEIRO de `images:` e o guard do
+`services.sh` recusa imagem sem workload ou workload sem imagem). Sem worker,
+nao ha pre-requisito de ordem. O pacote `@observability/connector` e o
+`docker/connector.Dockerfile` FICAM no repo — outros clientes usam a stack por
+compose.
 
 **PENDENTE-11 — `gitSha` da promocao != commit que construiu a imagem.**
 Nas lanes de hml/prod, `gitops-pin.sh` grava `$GITHUB_SHA` (o commit da branch de
@@ -598,10 +605,8 @@ procedimento de "desativar ambiente".
    `LANGWATCH_PROJECT_ID`). Policy do ESO e `conditions.namespaces` do
    ClusterSecretStore recebem `kos-components-dev` — **aditivo, lendo o vivo**.
 4. Reloader `--namespaces` += `kos-components-dev` (aditivo, lendo o vivo).
-5. **LangWatch primeiro** (PENDENTE-10): `hv-kos-langwatch-hml` `Healthy` ANTES
-   do primeiro sync de `hv-kos-components-dev` — dev e hml usam o ClickHouse de
-   `kos-langwatch-hml`. Sem ele o `trace-ingestion-worker` sai 1 no boot, a
-   Application nunca fica `Healthy` e o gate reprova um deploy correto da api.
+5. **LangWatch**: N/A desde 2026-11-27 — descomissionado (PENDENTE-10
+   resolvido); sem `trace-ingestion-worker` nao ha dependencia de ordem.
 6. Stream E aplica AppProject `kos-hapvida` e a Application
    `hv-kos-components-dev`; conta `ci-kos-verify` no Argo -> `ARGOCD_CI_TOKEN`.
 7. `gh variable set KOS_EKS_PUBLISH_ENABLED true` -> primeiro run por
@@ -734,7 +739,6 @@ Service quando há porta, e o seletor dele são os labels do pod template.
 | workload | Service | opt-out |
 |---|---|---|
 | `api` | sim | **8/8** |
-| `trace-ingestion-worker` | **não** | 0/8 — e também nunca recebe init-container otel |
 | Job `migrations`, CronJob `backup` | não | 0/8 (e `jobs`/`cronjobs` nem estão nos recursos do webhook de workload) |
 
 ### O que mudou
@@ -777,7 +781,6 @@ $ bash deploy/__tests__/run-all.sh                 TODAS as suites passaram
 
 $ helm template × {dev,hml,prod} com pins válidos
     Deployment api                     Service=True   opt-out 8/8
-    Deployment trace-ingestion-worker  Service=False  opt-out 0/8
     Job migrations / CronJob backup                   opt-out 0/8
     nenhum valor booleano; todos string
 

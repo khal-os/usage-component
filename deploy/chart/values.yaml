@@ -11,7 +11,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Prefixo dos nomes dos objetos. Vazio = sem prefixo: os objetos se chamam
-# exatamente como a chave do servico (`api`, `trace-ingestion-worker`, ...), que
+# exatamente como a chave do servico (`api`, `billing-close-scheduler`, ...), que
 # e o que o operador digita no `kubectl -n kos-components-dev get deploy api`.
 namePrefix: ""
 
