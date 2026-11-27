@@ -3,13 +3,13 @@
 # sem rebuild. E isso que garante que o binario homologado e bit-a-bit o que vai
 # para producao.
 #
-# TRES IMAGENS, UM PIN. O repo publica usage-module, usage-connector e
-# usage-db-backup, e cinco workloads as compartilham (api, billing-close-
-# scheduler e o Job de migracao rodam o MESMO usage-module). A matrix e sobre
+# DUAS IMAGENS, UM PIN. O repo publica usage-module e usage-db-backup, e
+# quatro workloads as compartilham (api, billing-close-scheduler e o Job de
+# migracao rodam o MESMO usage-module). A matrix e sobre
 # IMAGENS — construir por servico publicaria tres digests diferentes do mesmo
 # commit (npm ci nao e bit-a-bit reprodutivel) e "qual binario e o commit X"
-# deixaria de ter resposta unica. O pin dos tres entra num commit so: pinar em
-# tres commits abriria uma janela com a api nova falando com o schema velho.
+# deixaria de ter resposta unica. O pin das duas entra num commit so: pinar em
+# dois commits abriria uma janela com a api nova falando com o schema velho.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # O QUE O OWNER PRECISA CADASTRAR (nenhum valor real aparece neste arquivo)
@@ -25,7 +25,7 @@
 #                               nao existe caminho de skip.
 #
 #   Infra que precisa existir ANTES do primeiro run:
-#     · ECR 278522730053: kos/usage-module, kos/usage-connector, kos/usage-db-backup
+#     · ECR 278522730053: kos/usage-module, kos/usage-db-backup
 #       (IMMUTABLE, scanOnPush, repository policy de pull para 701 e 652)
 #     · role OIDC arn:aws:iam::278522730053:role/gha-kos-usage-component-ecr-push
 #     · Application hv-kos-components-dev aplicada no Argo

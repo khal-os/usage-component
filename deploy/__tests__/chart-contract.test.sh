@@ -179,9 +179,10 @@ done
 
 titulo "singletons: Recreate + 1 replica, e a schema e quem garante o 1"
 DEV="${RENDER[dev]}"
-BLOCO_WORKER="$(awk '/^kind: Deployment$/{d=1} d&&/name: trace-ingestion-worker$/{p=1} p; p&&/^---$/{exit}' <<<"$DEV")"
-contem "worker: strategy Recreate" "type: Recreate" "$BLOCO_WORKER"
-contem "worker: 1 replica"         "replicas: 1"    "$BLOCO_WORKER"
+# O singleton RENDERIZADO (trace-ingestion-worker) foi removido em 2026-11-27
+# com o descomissionamento do LangWatch; a regra segue viva na schema (fixture
+# bad-recreate-replicas.yaml) e no chart generico.
+nao_contem "worker removido nao aparece mais no render" "name: trace-ingestion-worker" "$DEV"
 
 titulo "PDB nunca proibe eviction para sempre (PLANO §7 risco 3)"
 # `maxUnavailable: 0` com 1 replica e `minAvailable: 1` com outro nome: o drain
@@ -195,22 +196,27 @@ docs_de_kind() { # docs_de_kind <kind> <render>
                     END { if (guarda) printf "%s", buf }' <<<"$2"
 }
 for env in dev hml prod; do
-  nao_contem "${env}: nenhum PDB com maxUnavailable 0" "maxUnavailable: 0" "$(docs_de_kind PodDisruptionBudget "${RENDER[$env]}")"
-  contem "${env}: todo PDB com maxUnavailable 1" "maxUnavailable: 1" "$(docs_de_kind PodDisruptionBudget "${RENDER[$env]}")"
+  PDBS="$(docs_de_kind PodDisruptionBudget "${RENDER[$env]}")"
+  nao_contem "${env}: nenhum PDB com maxUnavailable 0" "maxUnavailable: 0" "$PDBS"
+  # O PDB so renderiza com replicas > 1 ou strategy Recreate (pdb.yaml). Em
+  # dev/hml nao ha nenhum dos dois (api e 1 replica; o singleton saiu em
+  # 2026-11-27) — o assert positivo so vale quando ha PDB para inspecionar.
+  if [ -n "$PDBS" ]; then
+    contem "${env}: todo PDB com maxUnavailable 1" "maxUnavailable: 1" "$PDBS"
+  fi
 done
-BLOCO_PDB="$(docs_de_kind PodDisruptionBudget "$DEV")"
-contem "worker: PDB do singleton existe" "name: trace-ingestion-worker" "$BLOCO_PDB"
+verifica "dev sem PDB (api 1 replica; singleton removido em 2026-11-27)" "0" "$(grep -c '^kind: PodDisruptionBudget$' <<<"$DEV")"
 
 titulo "replicas > 1 com Recreate e REPROVADO (nao renderizado em silencio)"
 # O contrato do singleton nao vale se a unica coisa que o sustenta for um
 # comentario. Este caso e o do PLANO §7 risco 3 ("duplica traces e a fatura").
 SAIDA="$(render dev -f "$PINS" -f "${FIX}/bad-recreate-replicas.yaml" 2>&1 || true)"
-contem "a schema cita o servico" "services.trace-ingestion-worker" "$SAIDA"
+contem "a schema cita o servico" "services.billing-close-scheduler" "$SAIDA"
 contem "a schema cita replicas"  "replicas"                        "$SAIDA"
 
 titulo "prod: api com 2 replicas e PDB proprio"
 PROD="${RENDER[prod]}"
-verifica "prod tem 2 PDBs (api + worker)" "2" "$(grep -c '^kind: PodDisruptionBudget$' <<<"$PROD")"
+verifica "prod tem 1 PDB (api)" "1" "$(grep -c '^kind: PodDisruptionBudget$' <<<"$PROD")"
 contem "prod: api com replicas 2" "replicas: 2" "$(awk '/^kind: Deployment$/{d=1} d&&/^  name: api$/{p=1} p; p&&/^---$/{exit}' <<<"$PROD")"
 
 titulo "ExternalSecret com os defaults do CRD explicitos"
@@ -218,7 +224,7 @@ ES="$(awk '/^kind: ExternalSecret$/{p=1} p; p&&/^---$/{exit}' <<<"$DEV")"
 for chave in "creationPolicy: Owner" "deletionPolicy: Retain" "conversionStrategy: Default" "decodingStrategy: None" "metadataPolicy: None" "kind: ClusterSecretStore" "refreshInterval: \"1m\""; do
   contem "ExternalSecret: ${chave}" "$chave" "$ES"
 done
-verifica "um ExternalSecret por workload habilitado (4)" "4" "$(grep -c '^kind: ExternalSecret$' <<<"$DEV")"
+verifica "um ExternalSecret por workload habilitado (3)" "3" "$(grep -c '^kind: ExternalSecret$' <<<"$DEV")"
 
 titulo "ES de workload comum: sem hook, sem wave, creationPolicy Owner"
 ES_API="$(doc_de ExternalSecret api-env <<<"$DEV")"
@@ -265,12 +271,12 @@ fi
 titulo "servico SEM secrets nao falha ABERTO"
 # Sem `secrets:` nao ha ExternalSecret; um `envFrom` (ou uma annotation de
 # Reloader) para o `<svc>-env` inexistente prenderia o pod em
-# CreateContainerConfigError para sempre. Nenhum dos 5 workloads deste repo cai
+# CreateContainerConfigError para sempre. Nenhum dos 4 workloads deste repo cai
 # no caso — o chart, porem, e o generico do Padrao (CONTRATO §5).
 SEM_SECRETS="$(render dev -f "$PINS" -f "${FIX}/svc-sem-secrets.yaml")"
 nao_contem "nenhuma referencia a probe-sem-secrets-env" "probe-sem-secrets-env" "$SEM_SECRETS"
 contem "mas o Deployment do servico existe" "name: probe-sem-secrets" "$SEM_SECRETS"
-verifica "e continua havendo 4 ExternalSecrets (um por workload COM secrets)" "4" \
+verifica "e continua havendo 3 ExternalSecrets (um por workload COM secrets)" "3" \
   "$(grep -c '^kind: ExternalSecret$' <<<"$SEM_SECRETS")"
 
 titulo "Reloader escopado em todo Deployment"

@@ -12,11 +12,10 @@ for bin in git helm python3 jq; do command -v "$bin" >/dev/null || { echo "FALTA
 
 TRAB="$(mktemp -d)"; trap 'rm -rf "$TRAB"' EXIT
 D_MOD="sha256:$(printf 'a%.0s' $(seq 64))"
-D_CON="sha256:$(printf 'b%.0s' $(seq 64))"
 D_BAK="sha256:$(printf 'c%.0s' $(seq 64))"
 SHA1="$(printf 'd%.0s' $(seq 40))"
 SHA2="$(printf 'e%.0s' $(seq 40))"
-BLOCO="{\"usage-module\":\"${D_MOD}\",\"usage-connector\":\"${D_CON}\",\"usage-db-backup\":\"${D_BAK}\"}"
+BLOCO="{\"usage-module\":\"${D_MOD}\",\"usage-db-backup\":\"${D_BAK}\"}"
 
 novo_repo() { # novo_repo <nome> -> imprime o caminho do clone de trabalho
   local base="${TRAB}/$1"
@@ -38,14 +37,14 @@ W="$(novo_repo recusas)"
 SAIDA="$(roda "$W" producao "$BLOCO" "$SHA1")"        ; contem "ambiente invalido" "ambiente invalido" "$SAIDA"
 SAIDA="$(roda "$W" dev 'nao-e-json' "$SHA1")"          ; contem "bloco nao-JSON"    "JSON"              "$SAIDA"
 SAIDA="$(roda "$W" dev "$BLOCO" 'sha-curto')"          ; contem "git-sha invalido"  "40 hex"            "$SAIDA"
-SAIDA="$(roda "$W" dev "{\"usage-module\":\"dev-abc123\",\"usage-connector\":\"${D_CON}\",\"usage-db-backup\":\"${D_BAK}\"}" "$SHA1")"
+SAIDA="$(roda "$W" dev "{\"usage-module\":\"dev-abc123\",\"usage-db-backup\":\"${D_BAK}\"}" "$SHA1")"
 contem "tag no lugar de digest" "fora do formato" "$SAIDA"
 SAIDA="$(roda "$W" dev "{\"usage-module\":\"${D_MOD}\"}" "$SHA1")"
 contem "bloco parcial e recusado" "NAO pina" "$SAIDA"
-SAIDA="$(roda "$W" dev "{\"usage-module\":\"${D_MOD}\",\"usage-connector\":\"${D_CON}\",\"usage-db-backup\":\"${D_BAK}\",\"intruso\":\"${D_MOD}\"}" "$SHA1")"
+SAIDA="$(roda "$W" dev "{\"usage-module\":\"${D_MOD}\",\"usage-db-backup\":\"${D_BAK}\",\"intruso\":\"${D_MOD}\"}" "$SHA1")"
 contem "imagem nao declarada e recusada" "nao declara" "$SAIDA"
 ZEROS="sha256:$(printf '0%.0s' $(seq 64))"
-SAIDA="$(roda "$W" dev "{\"usage-module\":\"${ZEROS}\",\"usage-connector\":\"${D_CON}\",\"usage-db-backup\":\"${D_BAK}\"}" "$SHA1")"
+SAIDA="$(roda "$W" dev "{\"usage-module\":\"${ZEROS}\",\"usage-db-backup\":\"${D_BAK}\"}" "$SHA1")"
 contem "placeholder e recusado" "PLACEHOLDER" "$SAIDA"
 verifica "nenhum commit foi criado nas recusas" "1" "$( (cd "$W" && git rev-list --count HEAD) )"
 
@@ -71,7 +70,6 @@ verifica "o commit toca EXATAMENTE um arquivo" "deploy/values-dev.yaml" \
   "$( (cd "$W" && git show --pretty=format: --name-only HEAD | sed '/^$/d') )"
 contem "autor e o bot de release" "khal-release-bot" "$( (cd "$W" && git log -1 --format='%an') )"
 contem "digest do module gravado"    "$D_MOD" "$(cat "$W/deploy/values-dev.yaml")"
-contem "digest do connector gravado" "$D_CON" "$(cat "$W/deploy/values-dev.yaml")"
 contem "digest do backup gravado"    "$D_BAK" "$(cat "$W/deploy/values-dev.yaml")"
 contem "comentarios preservados"     "ESCRITO POR deploy/gitops-pin.sh" "$(cat "$W/deploy/values-dev.yaml")"
 

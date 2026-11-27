@@ -8,23 +8,23 @@ TRAB="$(mktemp -d)"; trap 'rm -rf "$TRAB"' EXIT
 
 titulo "saida do repo real"
 IMGS="$(deploy/services.sh images)"
-verifica "tres imagens declaradas" "3" "$(python3 -c 'import json,sys;print(len(json.load(sys.stdin)))' <<<"$IMGS")"
-verifica "nomes em ordem estavel" "usage-connector usage-db-backup usage-module" \
+verifica "duas imagens declaradas" "2" "$(python3 -c 'import json,sys;print(len(json.load(sys.stdin)))' <<<"$IMGS")"
+verifica "nomes em ordem estavel" "usage-db-backup usage-module" \
   "$(python3 -c 'import json,sys;print(" ".join(i["name"] for i in json.load(sys.stdin)))' <<<"$IMGS")"
 contem "matrix no formato do GitHub" '"include"' "$(deploy/services.sh matrix)"
 
-titulo "workloads: cinco, e o scheduler nasce desligado"
+titulo "workloads: quatro, e o scheduler nasce desligado"
 WL="$(deploy/services.sh workloads)"
-verifica "cinco workloads" "5" "$(wc -l <<<"$WL" | tr -d ' ')"
+verifica "quatro workloads" "4" "$(wc -l <<<"$WL" | tr -d ' ')"
 contem "api usa usage-module"                    "api	Deployment	usage-module	true"                     "$WL"
-contem "worker usa usage-connector"              "trace-ingestion-worker	Deployment	usage-connector	true"     "$WL"
+nao_contem "worker removido da lista (2026-11-27)" "trace-ingestion-worker" "$WL"
 contem "scheduler declarado e desabilitado"      "billing-close-scheduler	Deployment	usage-module	false"    "$WL"
 contem "migrations e Job"                        "migrations	Job	usage-module	true"                          "$WL"
 contem "backup e CronJob"                        "backup	CronJob	usage-db-backup	true"                        "$WL"
 
 titulo "guards de coerencia"
 # (1) workload apontando para imagem nao declarada
-sed -e 's|      name: usage-connector|      name: usage-fantasma|' deploy/values.yaml > "${TRAB}/fantasma.yaml"
+sed -e 's|      name: usage-db-backup|      name: usage-fantasma|' deploy/values.yaml > "${TRAB}/fantasma.yaml"
 if KOS_VALUES_FILE="${TRAB}/fantasma.yaml" deploy/services.sh images >/dev/null 2>"${TRAB}/e1"; then
   falha "aceitou workload apontando para imagem nao declarada"
 else

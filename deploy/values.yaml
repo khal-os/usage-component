@@ -38,7 +38,7 @@ common:
   # `environment` (dev|hml|prod) vem do values do ambiente.
 
 # ── Registro de imagens ──────────────────────────────────────────────────────
-# Tres imagens, tres Dockerfiles JA EXISTENTES no repo (nao criamos variantes:
+# Duas imagens, dois Dockerfiles JA EXISTENTES no repo (nao criamos variantes:
 # a esteira atual builda estes mesmos arquivos, e duplicar Dockerfile e garantir
 # que um dos dois vai envelhecer sem ninguem perceber). O non-root NAO vem de um
 # `USER` na imagem e sim do `securityContext` do chart (runAsUser/runAsGroup/
@@ -48,14 +48,15 @@ common:
 # de build das lanes. A matrix e sobre IMAGENS, nao sobre servicos: api,
 # billing-close-scheduler e o Job de migracao rodam o MESMO binario
 # (usage-module) e nao podem virar tres builds do mesmo commit.
+#
+# O `usage-connector` saiu em 2026-11-27 junto do `trace-ingestion-worker`
+# (ver a nota no bloco `services:`): o `docker/connector.Dockerfile` e o
+# pacote @observability/connector FICAM no repo — outros clientes ainda
+# sobem a stack por compose.
 images:
   usage-module:
     repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-module
     dockerfile: docker/module.Dockerfile
-    context: .
-  usage-connector:
-    repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-connector
-    dockerfile: docker/connector.Dockerfile
     context: .
   usage-db-backup:
     repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-db-backup
@@ -70,8 +71,9 @@ images:
 # deploy/chart/templates/deployment.yaml. Em uma frase: quem anota e o
 # auto-monitor do addon, ele governa "workload atras de um Service", e FORA
 # desse conjunto as 8 chaves sao REMOVIDAS na admissao — declara-las la vira
-# drift OutOfSync permanente, o oposto do que se queria. `trace-ingestion-worker`
-# nao tem Service, e tambem nunca recebe init-container otel.
+# drift OutOfSync permanente, o oposto do que se queria. Um workload sem porta
+# (ex.: `billing-close-scheduler`) nao tem Service, e tambem nunca recebe
+# init-container otel.
 #
 # POR QUE ISTO EXISTE — incidente de 2026-08-23 no cluster hapvida-dev:
 # o addon EKS `amazon-cloudwatch-observability` (v6.3.0, config default da
@@ -216,134 +218,19 @@ services:
       # ENVIRONMENT, MONGO_USAGE_DB_NAME, KHAL_AUTH_URL e CORS_ALLOWED_ORIGINS
       # sao por ambiente -> `envOverride` em values-<env>.yaml.
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # trace-ingestion-worker — o laco de ingestao (@observability/connector).
+  # ───────────────────────────────────────────────────────────────────────────────
+  # trace-ingestion-worker — REMOVIDO em 2026-11-27 (LangWatch descomissionado).
   #
-  # ⚠ ORDEM DE SUBIDA — PRE-REQUISITO BLOQUEANTE, nao preferencia: o LangWatch do
-  # ambiente (ClickHouse em `kos-langwatch-hml` para dev e hml,
-  # `kos-langwatch` para prod) tem de estar de pe ANTES do primeiro sync de
-  # `kos-components-<env>`. Isto NAO e sobre o probe: sem fonte configurada o
-  # processo sai 1 de proposito (run-trace-ingestion-loop.ts, audit G-1:
-  # "crash loop VISIVEL em vez de ocioso verde") e, com fonte porem sem
-  # ClickHouse alcancavel, `assertCompatibleSchema()` e fatal no boot. Em
-  # qualquer dos dois o Deployment nunca fica Available, a Application nunca fica
-  # Healthy e o gate (sem ramo de skip, 900s) REPROVA um deploy da api que estava
-  # correto.
-  #
-  # E se o LangWatch nao puder vir antes? Nao ha meia-volta barata: desligar so
-  # este workload num ambiente quebra a escada de promocao, porque as lanes de
-  # hml/prod montam o bloco de digests a partir das imagens RENDERIZADAS na
-  # origem e o gitops-pin exige o conjunto inteiro de `images:` (subconjunto e
-  # recusado, de proposito). Tirar `usage-connector` de `images:` para acompanhar
-  # exigiria tirar tambem este bloco. Ou seja: a ordem e o caminho — subir o
-  # LangWatch primeiro. Registrado como pre-requisito da stream E no
-  # deploy/README-STREAM.md.
-  # SINGLETON SEM LEASE: duas replicas ingerem o mesmo batch e duplicam traces
-  # (e a fatura). As travas sao `strategy: Recreate` + `replicas: 1` + a schema,
-  # que REPROVA `replicas > 1` junto de `Recreate` (values.schema.json,
-  # definitions.singleton) — sem ela, um `replicas: 3` no values do ambiente
-  # passaria calado. O PDB (maxUnavailable: 1, PLANO §7 risco 3) atrasa o despejo
-  # num drain; ele NAO e trava de unicidade e nao deve virar uma.
-  # ───────────────────────────────────────────────────────────────────────────
-  trace-ingestion-worker:
-    enabled: true
-    group: components
-    image:
-      name: usage-connector
-      repository: 278522730053.dkr.ecr.sa-east-1.amazonaws.com/kos/usage-connector
-      digest: ""
-      gitSha: ""
-    # Sem porta: e um laco, nao um servidor. Nenhum Service e renderizado.
-    replicas: 1
-    strategy: Recreate
-    preset: M
-    # Uma batelada de 1000 traces precisa TERMINAR antes do SIGKILL — o laco
-    # fecha o batch corrente ao receber SIGTERM. 60s e o mesmo valor do
-    # stop_grace_period do compose e do stopTimeout do ECS.
-    terminationGracePeriodSeconds: 60
-    tmpDir: true
-    health:
-      # Liveness que significa PROGRESSO, nao existencia de processo (audit
-      # G-1): o worker toca /tmp/trace-ingestion-heartbeat depois de CADA batch
-      # concluido; caminhos de erro deliberadamente NAO batem. `pgrep node`
-      # diria "saudavel" para um socket travado do ClickHouse enquanto a
-      # retencao de ~49 dias da fonte queima atras da parada.
-      #
-      # Aqui usamos `stat` (existencia), nao frescor: o compose compara a idade
-      # do arquivo contra 2x intervalo + 120s, mas um probe exec com aritmetica
-      # de data em `sh -c` e fragil de ler e de manter. O frescor real fica como
-      # follow-up (PENDENTE-5) — quando o app expuser /readyz honesto, ele vira
-      # o criterio dos dois lados.
-      liveness:
-        command: ["stat", "/tmp/trace-ingestion-heartbeat"]
-        # Generoso: o primeiro heartbeat so acontece depois do primeiro batch.
-        initialDelaySeconds: 120
-        periodSeconds: 60
-        timeoutSeconds: 5
-        failureThreshold: 5
-      readiness:
-        command: ["stat", "/tmp/trace-ingestion-heartbeat"]
-        initialDelaySeconds: 60
-        periodSeconds: 30
-        timeoutSeconds: 5
-        failureThreshold: 5
-      version: ""
-    secrets:
-      - app
-      - mongo
-      - langwatch
-    # Egress proprio: ClickHouse do LangWatch (8123) no namespace do ambiente.
-    # DNS e 443 ja estao liberados para todo pod do chart.
-    extraEgress: []
-    env:
-      - name: CLIENT_TIMEZONE
-        value: America/Sao_Paulo
-      - name: CLIENT_NAME
-        value: hapvida
-      - name: MONGO_DB_ATLAS
-        value: "true"
-      - name: LOG_LEVEL
-        value: info
-      - name: LOG_FORMAT
-        value: json
-      # Knobs do laco — os defaults do codigo, escritos EXPLICITAMENTE porque um
-      # default invisivel e um valor que ninguem revisa. Limites checados no
-      # boot (audit F-4): 0 ou lixo derruba o processo em vez de configurar um
-      # busy-loop.
-      - name: TRACE_INGESTION_INTERVAL_SECONDS
-        value: "60"
-      - name: TRACE_INGESTION_BATCH_SIZE
-        value: "1000"
-      # Issue #102: traces gravados ao mesmo tempo dentro do lote (1 = o laco
-      # sequencial antigo, teto 64). Traces da MESMA sessao ficam numa raia
-      # so, em ordem, porque o resumo da sessao e recalculado fora da
-      # transacao do insert. Erro por item: falha de formato do trace vai
-      # para ingest_failures e o lote segue; falha sistemica do banco (rede,
-      # primario caindo) impede novos inserts, espera os que estao em voo e
-      # aborta o lote sem avancar o cursor. Conflitos de escrita no contador
-      # de facetas sao refeitos pelo withTransaction do driver.
-      - name: TRACE_INGESTION_CONCURRENCY
-        value: "8"
-      # Decisao 61: um trace precisa ficar PARADO este tempo antes de ser
-      # ingerido. Ingerir no meio da execucao congela spans/tokens parciais no
-      # preco para sempre.
-      - name: TRACE_INGESTION_QUIET_PERIOD_SECONDS
-        value: "900"
-      - name: REPROCESS_INTERVAL_SECONDS
-        value: "3600"
-      # Decisao 183: a varredura de reprocessamento anda em pedacos deste
-      # tamanho, um por ciclo, para nunca segurar a ingestao.
-      - name: REPROCESS_MAX_TRACES_PER_CYCLE
-        value: "500"
-      # Decisao 127: ClickHouse direto e a UNICA fonte real. Sem ela o worker
-      # fica ocioso e o sync RECUSA rodar — nada de fallback silencioso.
-      - name: LANGWATCH_CLICKHOUSE_USER
-        value: default
-      - name: LANGWATCH_CLICKHOUSE_DATABASE
-        value: langwatch
-      # ENVIRONMENT, MONGO_USAGE_DB_NAME e LANGWATCH_CLICKHOUSE_URL por ambiente.
-      # LANGWATCH_CLICKHOUSE_PASSWORD e LANGWATCH_PROJECT_ID vem do secret
-      # `langwatch` (nunca literal).
+  # O LangWatch era a fonte unica de traces (decisao 127) e foi desligado: o
+  # conector `langwatch` saiu do catalogo do tenant hapvida e a instancia
+  # `kos-langwatch` foi derrubada. Sem fonte, o worker so tinha o crash-loop
+  # visivel por design (audit G-1) — e um Deployment que nunca fica Available
+  # derrubava o gate de promocao (900s, sem skip). Bloco e imagem
+  # `usage-connector` saem JUNTOS: o pin exige o conjunto INTEIRO de `images:`
+  # e o guard do services.sh recusa imagem sem workload ou workload sem
+  # imagem. O pacote @observability/connector e o docker/connector.Dockerfile
+  # FICAM — outros clientes ainda sobem a stack por compose.
+  # ───────────────────────────────────────────────────────────────────────────────
 
   # ───────────────────────────────────────────────────────────────────────────
   # billing-close-scheduler — fechamento automatico do mes (decisao 131).
@@ -504,9 +391,9 @@ ingressDefaults:
 albSubnetCidrs: []
 
 # Egress comum a todos os pods, alem de DNS e 443. Atlas via PrivateLink usa
-# faixa alta de portas (1024-65535) alem da 27017; ClickHouse do LangWatch e
-# 8123 no namespace kos-langwatch-<hml|prod>. Definido por ambiente porque o
-# namespace do LangWatch muda.
+# faixa alta de portas (1024-65535) alem da 27017. (Historico: o
+# `trace-ingestion-worker` usava 8123 em `kos-langwatch-<hml|prod>`; removido em
+# 2026-11-27.) Definido por ambiente porque os destinos mudam por ambiente.
 extraEgress: []
 
 # ── ESO ──────────────────────────────────────────────────────────────────────

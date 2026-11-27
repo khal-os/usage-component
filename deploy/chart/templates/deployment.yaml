@@ -64,7 +64,7 @@ spec:
          e a Application fica OutOfSync PARA SEMPRE.
          Aqui `service.yaml` renderiza Service exatamente quando ha `port`, e o
          seletor dele sao os labels deste pod template. Entao `$svc.port` e o
-         teste exato: `trace-ingestion-worker` (sem porta, sem Service) nao pode
+         teste exato: `billing-close-scheduler` (sem porta, sem Service) nao pode
          receber o global, e tambem nunca recebe init-container otel — fora do
          conjunto do auto-monitor nao ha injecao para desligar.
          `$svc.podAnnotations` continua valendo para TODOS: quem escreve ali esta

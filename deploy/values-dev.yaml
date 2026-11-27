@@ -43,9 +43,6 @@ pins:
   usage-module:
     digest: "sha256:77a084383e1f949d2098149b9e71874488c0c819d98e748ab89004203a804780"
     gitSha: "e4eb838cba5cf79f1a73d217c826f84ee022362a"
-  usage-connector:
-    digest: "sha256:14adc988366ff60a3e990541e5d8e77babc26c5871d9c56fb290737afb4666eb"
-    gitSha: "e4eb838cba5cf79f1a73d217c826f84ee022362a"
   usage-db-backup:
     digest: "sha256:396fa66711b7344a9afa648ff7f4a2631a649b69fe434c2bada515c518a5d488"
     gitSha: "e4eb838cba5cf79f1a73d217c826f84ee022362a"
@@ -78,21 +75,6 @@ services:
       # de KHAL_TOKEN_AUDIENCE). Derivado pelo khal-auth do module `usage` do
       # Module Catalog: <module-id>-mcp (ADR-125).
       MCP_AUDIENCE: usage-mcp
-
-  trace-ingestion-worker:
-    envOverride:
-      ENVIRONMENT: homolog
-      MONGO_USAGE_DB_NAME: usage_db
-      # dev NAO tem LangWatch proprio: usa o de hml (CONTRATO §3). Consequencia
-      # de ordem: `kos-langwatch-hml` (stream D/E) precisa estar de pe ANTES do
-      # primeiro sync de kos-components-dev — sem ClickHouse o worker sai 1 no
-      # boot e o gate reprova o deploy inteiro. Ver a nota do workload em
-      # deploy/values.yaml e o pre-requisito no README-STREAM.md.
-      LANGWATCH_CLICKHOUSE_URL: http://clickhouse.kos-langwatch-hml.svc.cluster.local:8123
-    extraEgress:
-      - namespace: kos-langwatch-hml
-        ports:
-          - { protocol: TCP, port: 8123 }
 
   billing-close-scheduler:
     envOverride:
